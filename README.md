@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🖌️ 笔墨 · 习字 (Bimo - Hanzi Calligraphy & SVG Exporter)
 
-## Getting Started
+<p align="center">
+  <strong>一款专为教学演示、PPT课件制作与汉字书法爱好者打造的高颜值、专业级汉字笔顺动画与 SVG 矢量导出工具。</strong>
+</p>
 
-First, run the development server:
+---
 
+## ✨ 项目简介
+
+**笔墨 · 习字** 结合了现代前端交互技术与古典中式美学，旨在提供极致流畅的汉字书写笔顺演示和高精度矢量笔画导出功能。
+
+项目采用水墨宣纸质感设计，完美模拟传统汉字习字环境。特别针对**教师课件制作（PowerPoint / WPS）**场景进行了深度定制，支持自由调配田字格与底字色彩，并支持一键将笔画步骤打包为 ZIP 格式的 SVG 矢量文件，完美解决课件制作中的笔画重组和动态书写痛点。
+
+---
+
+## 🚀 核心特性
+
+- **🖌️ 水墨笔意动画**：基于高性能矢量渲染，真实重现宣纸墨迹的渐进书写过程，支持“起笔、重书、暂停、循环”等多种操纵状态。
+- **⚙️ 全系统双配色板**：
+  - **田字格配色**：自主选择格线颜色，内部虚线与对角线自动计算自适应透明度阶梯（外框 $100\%$、中心虚线 $60\%$、对角斜线 $40\%$），精致而富层次感。
+  - **Ghost 底字配色**：自主调节背景参考字的颜色，满足不同风格课件（如护眼模式、复古模式）的色彩配置。
+  - 调色盘与屏幕中央大写字帖、底部笔画预览实现**全屏三端动态联动更新**。
+- **📦 一键 ZIP 智能导出**：
+  - **累积笔画 ZIP**：导出字形逐渐完成的过程（第 0 笔 $\to$ 最后一笔），适合分步递进展示。
+  - **单独笔画 ZIP**：导出每一个笔画的独立矢量路径（第 1 笔、第 2 笔……）。
+  - **强制底字输出机制**：无论是否勾选“显示底字”，第 0 笔（纯底字背景）均会强制导出，用作 PPT 图层叠放的最佳定位基底。
+- **⌨️ 极致流畅的中文输入**：精心优化的 React IME（输入法）监听机制。在键入拼音过程中允许流畅组词与选字，在确认选择后瞬间截断收缩，完美捍卫“单字输入”规范。
+- **🎋 古典视觉美学**：水墨风卷轴标题、宣纸纹理底衬、精致印章风格按钮、古典云纹装饰，提供沉浸式的书法练习氛围。
+
+---
+
+## 🛠️ 核心依赖库说明
+
+项目依托于以下优秀开源库构建，确保了轻量、高效与极高的生产力：
+
+| 库名称 | 版本 | 作用与功能说明 |
+| :--- | :--- | :--- |
+| [**hanzi-writer**](https://chanind.github.io/hanzi-writer/) | `^3.7.3` | **核心数据与渲染引擎**。负责加载高精度汉字 SVG 笔画路径（Strokes）数据，自动识别偏旁部首（`radStrokes`），并负责交互式书写动画的底层执行。 |
+| [**jszip**](https://stuk.github.io/jszip/) | `^3.10.1` | **前端高压缩打包引擎**。支持在浏览器本地（客户端）瞬间将数十张 SVG 矢量笔画文件压缩并生成标准的 ZIP 文件包，零延迟下载，免去后端中转。 |
+| [**Next.js (App Router)**](https://nextjs.org/) | `16.2.6` | 基于 React 的现代前端框架，提供极致的路由性能、快速渲染和结构化的现代应用开发底座。 |
+| [**React 19**](https://react.dev/) | `19.2.4` | 提供极致响应式的状态管理（useState, useRef, useEffect），与 IME 输入法事件高度融合，实现高度平滑的联动刷新。 |
+| [**Tailwind CSS**](https://tailwindcss.com/) | - | 用于快速开发优雅的古典水墨微动效 UI、自适应渐变背景、以及精致的印章控制按钮。 |
+
+---
+
+## 💻 本地运行与部署
+
+### 1. 克隆/打开项目
+确保本地已安装 Node.js 环境，建议使用 `pnpm` 包管理器。
+
+### 2. 安装依赖
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. 运行开发服务器
+```bash
+pnpm dev
+```
+打开浏览器访问 [http://localhost:3000](http://localhost:3000) 即可使用。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 💡 课件制作高手指南：如何在 WPS/PPT 中做出水墨书写动画？
 
-## Learn More
+利用本工具导出的**单独笔画 ZIP**，你可以轻松在课件里还原真实的笔尖运笔效果：
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **插入底图**：把导出的 `第0笔_底字.svg` 插入幻灯片作为背景。
+2. **导入与对齐**：把 `第1笔.svg` 到 `第N笔.svg` 全部插入，**全选图片**，点击绘图工具中的 **【水平居中】** 和 **【垂直居中】**，使所有图片与底字完全重合。
+3. **设置擦除动画**：
+   - 依次给第 1, 2, 3... 笔添加 **【擦除】（Wipe）** 进入动画。
+   - 点击 **【效果选项】**，根据真实笔顺选择擦除方向：
+     - **横画**：选择 **“自左侧”**
+     - **竖画**：选择 **“自顶部”**
+     - **撇/捺/点**：选择 **“自顶部”**
+4. **自动顺畅播放**：
+   - 将第 1 笔设为“单击时触发”，持续时间 `0.5秒`。
+   - 后面所有的笔画动画全部设为 **“接续前动作”**，持续时间 `0.4秒` 左右。
+   - 放映时，点击一次鼠标，汉字就会像被隐形毛笔书写一样，一笔一画苍劲有力地展现在你的田字格课件中！
