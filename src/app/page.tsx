@@ -74,7 +74,7 @@ export default function Home() {
 
     writerRef.current = writer
 
-    // 获取笔画数据
+    // 获取笔划数据
     HanziWriter.loadCharacterData(newChar).then((data) => {
       if (data && 'strokes' in data) {
         setTotalStrokes(data.strokes.length)
@@ -258,14 +258,14 @@ export default function Home() {
     ].join('\n')
   }
 
-  // Ghost 字（所有笔画用浅色显示）
+  // Ghost 字（所有笔划用浅色显示）
   const buildGhostSvg = (strokes: string[], color: string): string => {
     return strokes.map(s => `    <path d="${s}" fill="${color}" />`).join('\n')
   }
 
   type ExportOptions = { grid: boolean; ghost: boolean; gridColor: string; ghostColor: string }
 
-  // 构建累积笔画 SVG
+  // 构建累积笔划 SVG
   const buildStrokeSvg = (strokes: string[], strokeCount: number, opts: ExportOptions): string => {
     const gridPart = opts.grid ? '\n' + buildGridSvg(opts.gridColor) : ''
     const ghostPart = opts.ghost ? '\n' + buildGhostSvg(strokes, opts.ghostColor) : ''
@@ -315,7 +315,7 @@ export default function Home() {
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + svgContent
   }
 
-  // 下载累积笔画 SVG（单个）
+  // 下载累积笔划 SVG（单个）
   const downloadSingleStroke = async (strokeCount: number) => {
     const data = await HanziWriter.loadCharacterData(char)
     if (!data || !('strokes' in data)) return
@@ -333,7 +333,7 @@ export default function Home() {
     downloadSvg(svgContent, `${char}_第${strokeIndex + 1}笔.svg`)
   }
 
-  // 一键导出累积笔画 ZIP
+  // 一键导出累积笔划 ZIP
   const exportAllStrokesZip = async () => {
     const data = await HanziWriter.loadCharacterData(char)
     if (!data || !('strokes' in data)) return
@@ -345,16 +345,17 @@ export default function Home() {
       const svg = prepareSvg(buildStrokeSvg(data.strokes, i, currentOpts))
       zip.file(`${char}_累积_${String(i).padStart(2, '0')}.svg`, svg)
     }
+
     const blob = await zip.generateAsync({ type: 'blob' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${char}_累积笔画.zip`
+    a.download = `${char}_累积笔划.zip`
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 100)
   }
 
-  // 一键导出单独笔画 ZIP
+  // 一键导出单独笔划 ZIP
   const exportAllIndividualStrokesZip = async () => {
     const data = await HanziWriter.loadCharacterData(char)
     if (!data || !('strokes' in data)) return
@@ -363,17 +364,89 @@ export default function Home() {
     
     // 导出第 0 笔时，强制开启 ghost：无论用户是否勾选 Ghost 底字，底字底图都必须包含字形
     const zeroSvg = prepareSvg(buildStrokeSvg(data.strokes, 0, { ...opts, ghost: true }))
-    zip.file(`${char}_第0笔_底字.svg`, zeroSvg)
+    // 文件名统一使用两位数零填充格式以保证排序的绝对正确
+    zip.file(`${char}_00.svg`, zeroSvg)
     
     for (let i = 0; i < data.strokes.length; i++) {
       const svg = prepareSvg(buildIndividualStrokeSvg(data.strokes, i, opts))
-      zip.file(`${char}_第${i + 1}笔.svg`, svg)
+      zip.file(`${char}_${String(i + 1).padStart(2, '0')}.svg`, svg)
     }
+
+    // 注入自动组装 PPT 动画的 VBScript 脚本（仅 Windows 可用）
+    const vbsScript = `
+Set objFSO = CreateObject("Scripting.FileSystemObject")
+strFolder = objFSO.GetParentFolderName(WScript.ScriptFullName)
+Set objPPT = CreateObject("PowerPoint.Application")
+objPPT.Visible = True
+Set objPres = objPPT.Presentations.Add()
+Set objSlide = objPres.Slides.Add(1, 12) ' 12 = Blank Layout
+
+slideWidth = objPres.PageSetup.SlideWidth
+slideHeight = objPres.PageSetup.SlideHeight
+size = 400
+leftPos = (slideWidth - size) / 2
+topPos = (slideHeight - size) / 2
+
+Set objFolder = objFSO.GetFolder(strFolder)
+Set colFiles = objFolder.Files
+Dim arrFiles()
+count = 0
+For Each objFile In colFiles
+    If LCase(objFSO.GetExtensionName(objFile.Name)) = "svg" Then
+        ReDim Preserve arrFiles(count)
+        arrFiles(count) = objFile.Name
+        count = count + 1
+    End If
+Next
+
+' Bubble sort files by name to guarantee sequence: 00, 01, 02...
+If count > 1 Then
+    For i = 0 To count - 2
+        For j = 0 To count - 2 - i
+            If arrFiles(j) > arrFiles(j+1) Then
+                temp = arrFiles(j)
+                arrFiles(j) = arrFiles(j+1)
+                arrFiles(j+1) = temp
+            End If
+        Next
+    Next
+End If
+
+' 1. Load all shapes onto the slide and apply animations directly
+For i = 0 To count - 1
+    fullPath = strFolder & "\\" & arrFiles(i)
+    Set shape = objSlide.Shapes.AddPicture(fullPath, 0, -1, leftPos, topPos, size, size)
+    
+    If InStr(arrFiles(i), "_00.svg") > 0 Then
+        ' Background image, no animation needed
+    ElseIf InStr(arrFiles(i), "_01.svg") > 0 Then
+        ' First stroke: click to start (Trigger = 1), Animation Wipe = 22
+        Set eff = objSlide.TimeLine.MainSequence.AddEffect(shape, 22, 0, 1)
+        eff.EffectParameters.Direction = 1
+        eff.Timing.Duration = 0.5
+    Else
+        ' Following strokes: after previous (Trigger = 3), Animation Wipe = 22
+        Set eff = objSlide.TimeLine.MainSequence.AddEffect(shape, 22, 0, 3)
+        eff.EffectParameters.Direction = 1
+        eff.Timing.Duration = 0.5
+    End If
+Next
+`.trim().replace(/\n/g, '\r\n')
+
+    const msgText = "PPT 动画生成完毕！\n\n【重要提示】\n为了保证动画可以被自由修改且正常叠加，这些笔划不能被打成组合。\n请直接在此幻灯片按下【Ctrl + A】全选，然后【Ctrl + C】复制。\n\n（注意：由于跨软件剪贴板的格式限制，复制的动画仅支持粘贴到同为 PowerPoint 的课件中。如果粘贴到 WPS 中，动画可能会失效！）"
+    const msgCode = msgText.split('').map(c => c === '\n' ? 'vbCrLf' : `ChrW(${c.charCodeAt(0)})`).join(' & ')
+    const titleCode = "笔墨习字 - 成功".split('').map(c => `ChrW(${c.charCodeAt(0)})`).join(' & ')
+
+    const vbsFooter = `MsgBox ${msgCode}, 64, ${titleCode}`
+    const finalVbs = vbsScript + "\r\n" + vbsFooter
+
+    zip.file('1_双击我自动生成PPT动画.vbs', finalVbs)
+
     const blob = await zip.generateAsync({ type: 'blob' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${char}_单独笔画.zip`
+    a.download = `${char}_单独笔划.zip`
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 100)
   }
@@ -486,7 +559,7 @@ export default function Home() {
           </div>
 
           <div className="text-ink-light font-light tracking-wider">
-            <span className="opacity-70">笔画 </span>
+            <span className="opacity-70">笔划 </span>
             <span className="font-medium text-ink">{currentStroke}</span>
             <span className="opacity-50 mx-1">/</span>
             <span>{totalStrokes}</span>
@@ -601,7 +674,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 笔画预览网格（与导出效果一致） */}
+          {/* 笔划预览网格（与导出效果一致） */}
           <div className="flex flex-wrap justify-center gap-4 mb-6">
             {strokePaths.length > 0 && Array.from({ length: totalStrokes + 1 }, (_, i) => {
               const svgStr = buildStrokeSvg(strokePaths, i, getExportOpts())
@@ -636,14 +709,14 @@ export default function Home() {
               disabled={totalStrokes === 0}
               className="px-5 py-2.5 bg-cinnabar text-white text-sm rounded-lg hover:bg-cinnabar-light transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              <span>📦</span> 导出累积笔画 ZIP
+              <span>📦</span> 导出累积笔划 ZIP
             </button>
             <button
               onClick={exportAllIndividualStrokesZip}
               disabled={totalStrokes === 0}
               className="px-5 py-2.5 bg-ink text-white text-sm rounded-lg hover:bg-ink-light transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              <span>📦</span> 导出单独笔画 ZIP
+              <span>📦</span> 导出单独笔划 ZIP
             </button>
           </div>
         </div>
