@@ -16,7 +16,12 @@ export default function Home() {
   const [isPaused, setIsPausedState] = useState(false)
   const [exportWithGrid, setExportWithGrid] = useState(true)
   const [exportWithGhost, setExportWithGhost] = useState(true)
-  const [exportGridColor, setExportGridColor] = useState('#8b7355') // 默认古朴木褐色
+  const [exportGridBorderColor, setExportGridBorderColor] = useState('#8b7355') // 默认外框颜色
+  const [exportGridBorderWidth, setExportGridBorderWidth] = useState(4) // 默认外框粗细 (px)
+  const [exportGridDashedColor, setExportGridDashedColor] = useState('#8b7355') // 默认内虚线颜色
+  const [exportGridDashedWidth, setExportGridDashedWidth] = useState(2) // 默认内虚线粗细 (px)
+  const [exportStrokeColor, setExportStrokeColor] = useState('#1a1a1a') // 默认常规笔划颜色
+  const [exportCurrentStrokeColor, setExportCurrentStrokeColor] = useState('#c41e3a') // 默认当前笔划颜色 (朱砂红)
   const [exportGhostColor, setExportGhostColor] = useState('#d4c5b0') // 默认浅古沙色
   const [strokePaths, setStrokePaths] = useState<string[]>([])
 
@@ -64,8 +69,9 @@ export default function Home() {
       padding: 20,
       showOutline: true,
       outlineColor: exportGhostColor,
-      strokeColor: '#1a1a1a',
+      strokeColor: exportStrokeColor,
       radicalColor: '#c41e3a',
+      highlightColor: exportCurrentStrokeColor,
       strokeAnimationSpeed: 1,
       delayBetweenStrokes: 600,
       showCharacter: false,
@@ -247,14 +253,16 @@ export default function Home() {
   }
 
   // 田字格 SVG（米字格，在 1024×1024 坐标系中，采用不透明度阶梯）
-  const buildGridSvg = (color: string): string => {
+  const buildGridSvg = (opts: ExportOptions): string => {
+    const borderW = opts.gridBorderWidth * 4
+    const dashedW = opts.gridDashedWidth * 4
     return [
       '  <!-- 田字格 -->',
-      `  <rect x="8" y="8" width="1008" height="1008" fill="none" stroke="${color}" stroke-opacity="1" stroke-width="8" rx="16"/>`,
-      `  <line x1="0" y1="512" x2="1024" y2="512" stroke="${color}" stroke-opacity="0.6" stroke-width="5" stroke-dasharray="32 24"/>`,
-      `  <line x1="512" y1="0" x2="512" y2="1024" stroke="${color}" stroke-opacity="0.6" stroke-width="5" stroke-dasharray="32 24"/>`,
-      `  <line x1="0" y1="0" x2="1024" y2="1024" stroke="${color}" stroke-opacity="0.4" stroke-width="4"/>`,
-      `  <line x1="1024" y1="0" x2="0" y2="1024" stroke="${color}" stroke-opacity="0.4" stroke-width="4"/>`,
+      `  <line x1="0" y1="512" x2="1024" y2="512" stroke="${opts.gridDashedColor}" stroke-opacity="0.6" stroke-width="${dashedW}" stroke-dasharray="32 24"/>`,
+      `  <line x1="512" y1="0" x2="512" y2="1024" stroke="${opts.gridDashedColor}" stroke-opacity="0.6" stroke-width="${dashedW}" stroke-dasharray="32 24"/>`,
+      `  <line x1="0" y1="0" x2="1024" y2="1024" stroke="${opts.gridDashedColor}" stroke-opacity="0.6" stroke-width="${dashedW}" stroke-dasharray="32 24"/>`,
+      `  <line x1="1024" y1="0" x2="0" y2="1024" stroke="${opts.gridDashedColor}" stroke-opacity="0.6" stroke-width="${dashedW}" stroke-dasharray="32 24"/>`,
+      `  <rect x="8" y="8" width="1008" height="1008" fill="none" stroke="${opts.gridBorderColor}" stroke-opacity="1" stroke-width="${borderW}" rx="16"/>`,
     ].join('\n')
   }
 
@@ -263,15 +271,26 @@ export default function Home() {
     return strokes.map(s => `    <path d="${s}" fill="${color}" />`).join('\n')
   }
 
-  type ExportOptions = { grid: boolean; ghost: boolean; gridColor: string; ghostColor: string }
+  type ExportOptions = {
+    grid: boolean
+    ghost: boolean
+    gridBorderColor: string
+    gridBorderWidth: number
+    gridDashedColor: string
+    gridDashedWidth: number
+    ghostColor: string
+    strokeColor: string
+    currentStrokeColor: string
+  }
 
   // 构建累积笔划 SVG
   const buildStrokeSvg = (strokes: string[], strokeCount: number, opts: ExportOptions): string => {
-    const gridPart = opts.grid ? '\n' + buildGridSvg(opts.gridColor) : ''
+    const gridPart = opts.grid ? '\n' + buildGridSvg(opts) : ''
     const ghostPart = opts.ghost ? '\n' + buildGhostSvg(strokes, opts.ghostColor) : ''
     let activePaths = ''
     for (let i = 0; i < strokeCount; i++) {
-      activePaths += `\n    <path d="${strokes[i]}" fill="#1a1a1a" />`
+      const color = (i === strokeCount - 1) ? opts.currentStrokeColor : opts.strokeColor
+      activePaths += `\n    <path d="${strokes[i]}" fill="${color}" />`
     }
     return [
       '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 1024 1024">',
@@ -286,9 +305,9 @@ export default function Home() {
 
   // 构建单独一笔的 SVG
   const buildIndividualStrokeSvg = (strokes: string[], strokeIndex: number, opts: ExportOptions): string => {
-    const gridPart = opts.grid ? '\n' + buildGridSvg(opts.gridColor) : ''
+    const gridPart = opts.grid ? '\n' + buildGridSvg(opts) : ''
     const ghostPart = opts.ghost ? '\n' + buildGhostSvg(strokes, opts.ghostColor) : ''
-    const activePath = `\n    <path d="${strokes[strokeIndex]}" fill="#1a1a1a" />`
+    const activePath = `\n    <path d="${strokes[strokeIndex]}" fill="${opts.currentStrokeColor}" />`
     return [
       '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 1024 1024">',
       gridPart,
@@ -303,8 +322,13 @@ export default function Home() {
   const getExportOpts = (): ExportOptions => ({
     grid: exportWithGrid,
     ghost: exportWithGhost,
-    gridColor: exportGridColor,
-    ghostColor: exportGhostColor
+    gridBorderColor: exportGridBorderColor,
+    gridBorderWidth: exportGridBorderWidth,
+    gridDashedColor: exportGridDashedColor,
+    gridDashedWidth: exportGridDashedWidth,
+    ghostColor: exportGhostColor,
+    strokeColor: exportStrokeColor,
+    currentStrokeColor: exportCurrentStrokeColor
   })
 
   // 准备 SVG 内容（加 XML 头）
@@ -454,7 +478,7 @@ Next
   // 初始化及颜色更新
   useEffect(() => {
     loadChar(char)
-  }, [char, exportGhostColor])
+  }, [char, exportGhostColor, exportStrokeColor])
 
   return (
     <div className="min-h-screen ink-background relative overflow-hidden">
@@ -497,22 +521,43 @@ Next
               <div className="absolute inset-0 paper-texture rounded" />
 
               {/* 田字格背景 */}
-              <svg className="absolute inset-0 w-[240px] h-[240px]" viewBox="0 0 240 240">
-                {/* 外框 */}
-                <rect x="2" y="2" width="236" height="236" fill="none" stroke={exportGridColor} strokeOpacity="1" strokeWidth="2" rx="4" />
-                {/* 米字格中心线 */}
-                <line x1="0" y1="120" x2="240" y2="120" stroke={exportGridColor} strokeOpacity="0.6" strokeWidth="1.5" strokeDasharray="8 6" />
-                <line x1="120" y1="0" x2="120" y2="240" stroke={exportGridColor} strokeOpacity="0.6" strokeWidth="1.5" strokeDasharray="8 6" />
-                {/* 对角线 */}
-                <line x1="0" y1="0" x2="240" y2="240" stroke={exportGridColor} strokeOpacity="0.4" strokeWidth="1" />
-                <line x1="240" y1="0" x2="0" y2="240" stroke={exportGridColor} strokeOpacity="0.4" strokeWidth="1" />
-              </svg>
+              {exportWithGrid && (
+                <svg className="absolute inset-0 w-[240px] h-[240px]" viewBox="0 0 240 240">
+                  {/* 米字格中心线 */}
+                  <line x1="0" y1="120" x2="240" y2="120" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                  <line x1="120" y1="0" x2="120" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                  {/* 对角线 */}
+                  <line x1="0" y1="0" x2="240" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                  <line x1="240" y1="0" x2="0" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                  {/* 外框 */}
+                  <rect
+                    x={exportGridBorderWidth / 2}
+                    y={exportGridBorderWidth / 2}
+                    width={240 - exportGridBorderWidth}
+                    height={240 - exportGridBorderWidth}
+                    fill="none"
+                    stroke={exportGridBorderColor}
+                    strokeOpacity="1"
+                    strokeWidth={exportGridBorderWidth}
+                    rx="4"
+                  />
+                </svg>
+              )}
 
               {/* 汉字渲染区 */}
               <div
                 ref={containerRef}
                 className="relative w-[240px] h-[240px] z-10"
+                id="hanzi-writer-container"
               />
+              <style>{`
+                #hanzi-writer-container svg > g > g:nth-of-type(2) > path {
+                  stroke: ${exportStrokeColor} !important;
+                }
+                #hanzi-writer-container svg > g > g:nth-of-type(2) > path:nth-of-type(${currentStroke + 1}) {
+                  stroke: ${exportCurrentStrokeColor} !important;
+                }
+              `}</style>
             </div>
           </div>
 
@@ -622,52 +667,123 @@ Next
           </p>
         </footer>
 
-        {/* 导出区域 */}
-        <div className="mt-8 p-6 bg-paper-dark rounded-lg border border-wood-light">
-          <h3 className="text-lg font-medium text-ink mb-4 text-center">导出 SVG</h3>
+        {/* 导出与画面样式配置 */}
+        <div className="mt-8 p-6 bg-paper-dark rounded-lg border border-wood-light w-full max-w-2xl animate-slide-up-delay-2">
+          <h3 className="text-xl font-calligraphy text-ink mb-6 text-center tracking-wider">画面与导出配置</h3>
 
-          {/* 导出配置 */}
-          <div className="flex justify-center items-center gap-6 mb-6 p-3 bg-paper rounded-lg border border-wood-light">
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={exportWithGrid}
-                  onChange={(e) => setExportWithGrid(e.target.checked)}
-                  className="w-4 h-4 accent-cinnabar"
-                />
-                <span className="text-sm text-ink font-medium">田字格</span>
-              </label>
-              {exportWithGrid && (
-                <div className="flex items-center gap-1.5 ml-1 transition-all duration-300">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {/* 田字格样式 */}
+            <div className="p-4 bg-paper rounded-lg border border-wood-light flex flex-col gap-3">
+              <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-2 flex items-center gap-1.5">
+                <span>田</span> 格线样式
+              </h4>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
-                    type="color"
-                    value={exportGridColor}
-                    onChange={(e) => setExportGridColor(e.target.value)}
-                    className="w-5 h-5 p-0 border border-wood-light rounded cursor-pointer bg-transparent overflow-hidden"
-                    title="选择田字格颜色"
+                    type="checkbox"
+                    checked={exportWithGrid}
+                    onChange={(e) => setExportWithGrid(e.target.checked)}
+                    className="w-4 h-4 accent-cinnabar"
                   />
+                  <span className="text-sm text-ink font-medium">启用格线</span>
+                </label>
+              </div>
+              {exportWithGrid && (
+                <div className="flex flex-col gap-3 mt-1">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-ink-light">边框颜色</span>
+                    <input
+                      type="color"
+                      value={exportGridBorderColor}
+                      onChange={(e) => setExportGridBorderColor(e.target.value)}
+                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-ink-light">边框粗细 (px)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={exportGridBorderWidth}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setExportGridBorderWidth(isNaN(val) ? 0 : val);
+                      }}
+                      className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-ink-light">虚线颜色</span>
+                    <input
+                      type="color"
+                      value={exportGridDashedColor}
+                      onChange={(e) => setExportGridDashedColor(e.target.value)}
+                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-ink-light">虚线粗细 (px)</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={exportGridDashedWidth}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setExportGridDashedWidth(isNaN(val) ? 0 : val);
+                      }}
+                      className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
+                    />
+                  </div>
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
+
+            {/* 笔划样式 */}
+            <div className="p-4 bg-paper rounded-lg border border-wood-light flex flex-col gap-3">
+              <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-2 flex items-center gap-1.5">
+                <span>笔</span> 墨迹与底字
+              </h4>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-ink font-medium">常规笔划颜色</span>
                 <input
-                  type="checkbox"
-                  checked={exportWithGhost}
-                  onChange={(e) => setExportWithGhost(e.target.checked)}
-                  className="w-4 h-4 accent-cinnabar"
+                  type="color"
+                  value={exportStrokeColor}
+                  onChange={(e) => setExportStrokeColor(e.target.value)}
+                  className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
                 />
-                <span className="text-sm text-ink font-medium">Ghost 底字</span>
-              </label>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-ink font-medium">当前笔划颜色</span>
+                <input
+                  type="color"
+                  value={exportCurrentStrokeColor}
+                  onChange={(e) => setExportCurrentStrokeColor(e.target.value)}
+                  className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={exportWithGhost}
+                    onChange={(e) => setExportWithGhost(e.target.checked)}
+                    className="w-4 h-4 accent-cinnabar"
+                  />
+                  <span className="text-sm text-ink font-medium">启用Ghost底字</span>
+                </label>
+              </div>
               {exportWithGhost && (
-                <div className="flex items-center gap-1.5 ml-1 transition-all duration-300">
+                <div className="flex items-center justify-between gap-4 mt-1 transition-all">
+                  <span className="text-xs text-ink-light">底字颜色</span>
                   <input
                     type="color"
                     value={exportGhostColor}
                     onChange={(e) => setExportGhostColor(e.target.value)}
-                    className="w-5 h-5 p-0 border border-wood-light rounded cursor-pointer bg-transparent overflow-hidden"
-                    title="选择Ghost底字颜色"
+                    className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
                   />
                 </div>
               )}
@@ -680,7 +796,7 @@ Next
               const svgStr = buildStrokeSvg(strokePaths, i, getExportOpts())
               const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`
               return (
-                <div key={`${char}-${i}-${exportWithGrid}-${exportWithGhost}-${exportGridColor}-${exportGhostColor}`} className="flex flex-col items-center gap-2">
+                <div key={`${char}-${i}-${exportWithGrid}-${exportWithGhost}-${exportGridBorderColor}-${exportGridBorderWidth}-${exportGridDashedColor}-${exportGridDashedWidth}-${exportStrokeColor}-${exportCurrentStrokeColor}-${exportGhostColor}`} className="flex flex-col items-center gap-2">
                   <div className="relative">
                     <img
                       src={dataUrl}
