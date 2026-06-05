@@ -7,8 +7,8 @@ import JSZip from 'jszip'
 type AnimationState = 'idle' | 'playing' | 'paused' | 'complete'
 
 export default function Home() {
-  const [char, setChar] = useState('永')
-  const [inputChar, setInputChar] = useState('永')
+  const [char, setChar] = useState('笔')
+  const [inputChar, setInputChar] = useState('笔')
   const [state, setState] = useState<AnimationState>('idle')
   const [currentStroke, setCurrentStroke] = useState(0)
   const [totalStrokes, setTotalStrokes] = useState(0)
@@ -24,6 +24,38 @@ export default function Home() {
   const [exportCurrentStrokeColor, setExportCurrentStrokeColor] = useState('#c41e3a') // 默认当前笔划颜色 (朱砂红)
   const [exportGhostColor, setExportGhostColor] = useState('#d4c5b0') // 默认浅古沙色
   const [strokePaths, setStrokePaths] = useState<string[]>([])
+  const STORAGE_KEY = 'hanzi_export_configs'
+  const MAX_CONFIGS = 20
+  // 挂载标记：避免 SSR 与客户端 localStorage 读取结果不一致导致 hydration 不匹配
+  const [mounted, setMounted] = useState(false)
+  // 懒初始化：仅在挂载时同步读取一次 localStorage
+  const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          // 清洗旧数据：仅保留新结构需要的字段
+          return parsed
+            .filter((x: unknown): x is { id: string; timestamp: number; config: ExportOptions } =>
+              typeof x === 'object' && x !== null
+              && typeof (x as Record<string, unknown>).id === 'string'
+              && typeof (x as Record<string, unknown>).timestamp === 'number'
+              && typeof (x as Record<string, unknown>).config === 'object'
+              && (x as Record<string, unknown>).config !== null
+            )
+            .map((x): SavedConfig => ({
+              id: x.id,
+              timestamp: x.timestamp,
+              config: x.config
+            }))
+        }
+      }
+    } catch {
+      // 解析失败静默忽略
+    }
+    return []
+  })
 
   const writerRef = useRef<HanziWriter | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -283,6 +315,12 @@ export default function Home() {
     currentStrokeColor: string
   }
 
+  type SavedConfig = {
+    id: string
+    timestamp: number
+    config: ExportOptions
+  }
+
   // 构建累积笔划 SVG
   const buildStrokeSvg = (strokes: string[], strokeCount: number, opts: ExportOptions): string => {
     const gridPart = opts.grid ? '\n' + buildGridSvg(opts) : ''
@@ -317,6 +355,36 @@ export default function Home() {
       '  </g>',
       '</svg>'
     ].join('\n')
+  }
+
+  // 构建"风格样片"SVG：抽象展示配置（不含任何具体汉字）
+  const buildStyleTileSvg = (opts: ExportOptions): string => {
+    const borderW = Math.max(1, opts.gridBorderWidth * 0.5)
+    const dashedW = Math.max(0.6, opts.gridDashedWidth * 0.5)
+    const gridParts: string[] = []
+    if (opts.grid) {
+      gridParts.push(`<rect x="2" y="2" width="96" height="96" fill="none" stroke="${opts.gridBorderColor}" stroke-width="${borderW}" rx="2"/>`)
+      gridParts.push(`<line x1="50" y1="2" x2="50" y2="98" stroke="${opts.gridDashedColor}" stroke-width="${dashedW}" stroke-dasharray="3 2"/>`)
+      gridParts.push(`<line x1="2" y1="50" x2="98" y2="50" stroke="${opts.gridDashedColor}" stroke-width="${dashedW}" stroke-dasharray="3 2"/>`)
+    }
+    const ghostPart = opts.ghost
+      ? `<line x1="22" y1="78" x2="78" y2="22" stroke="${opts.ghostColor}" stroke-width="8" stroke-linecap="round"/>`
+      : ''
+    return [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+      ...gridParts,
+      ghostPart,
+      `<line x1="22" y1="78" x2="78" y2="22" stroke="${opts.strokeColor}" stroke-width="5" stroke-linecap="round"/>`,
+      `<circle cx="78" cy="22" r="3.5" fill="${opts.currentStrokeColor}"/>`,
+      '</svg>'
+    ].join('')
+  }
+
+  // 时间格式化：MM/DD HH:mm
+  const formatTime = (ts: number): string => {
+    const d = new Date(ts)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
   const getExportOpts = (): ExportOptions => ({
@@ -359,6 +427,7 @@ export default function Home() {
 
   // 一键导出累积笔划 ZIP
   const exportAllStrokesZip = async () => {
+    saveCurrentConfig()
     const data = await HanziWriter.loadCharacterData(char)
     if (!data || !('strokes' in data)) return
     const opts = getExportOpts()
@@ -381,6 +450,7 @@ export default function Home() {
 
   // 一键导出单独笔划 ZIP
   const exportAllIndividualStrokesZip = async () => {
+    saveCurrentConfig()
     const data = await HanziWriter.loadCharacterData(char)
     if (!data || !('strokes' in data)) return
     const opts = getExportOpts()
@@ -396,7 +466,19 @@ export default function Home() {
       zip.file(`${char}_${String(i + 1).padStart(2, '0')}.svg`, svg)
     }
 
-    // 注入自动组装 PPT 动画的 VBScript 脚本（仅 Windows 可用）
+    zip.file('1_双击我自动生成PPT动画.vbs', buildIndividualVbs())
+
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${char}_单独笔划.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 100)
+  }
+
+  // 生成 PPT 动画自动组装 VBS 脚本（仅 Windows 可用）
+  const buildIndividualVbs = (): string => {
     const vbsScript = `
 Set objFSO = CreateObject("Scripting.FileSystemObject")
 strFolder = objFSO.GetParentFolderName(WScript.ScriptFullName)
@@ -440,7 +522,7 @@ End If
 For i = 0 To count - 1
     fullPath = strFolder & "\\" & arrFiles(i)
     Set shape = objSlide.Shapes.AddPicture(fullPath, 0, -1, leftPos, topPos, size, size)
-    
+
     If InStr(arrFiles(i), "_00.svg") > 0 Then
         ' Background image, no animation needed
     ElseIf InStr(arrFiles(i), "_01.svg") > 0 Then
@@ -462,23 +544,126 @@ Next
     const titleCode = "笔墨习字 - 成功".split('').map(c => `ChrW(${c.charCodeAt(0)})`).join(' & ')
 
     const vbsFooter = `MsgBox ${msgCode}, 64, ${titleCode}`
-    const finalVbs = vbsScript + "\r\n" + vbsFooter
+    return vbsScript + "\r\n" + vbsFooter
+  }
 
-    zip.file('1_双击我自动生成PPT动画.vbs', finalVbs)
+  // 一键导出全部（累积笔划 + 单独笔划）ZIP
+  const exportAllZip = async () => {
+    saveCurrentConfig()
+    const data = await HanziWriter.loadCharacterData(char)
+    if (!data || !('strokes' in data)) return
+    const opts = getExportOpts()
+    const zip = new JSZip()
+
+    // 累积笔划子包
+    const cumulativeFolder = zip.folder(`${char}_累积笔划`)
+    if (!cumulativeFolder) return
+    for (let i = 0; i <= data.strokes.length; i++) {
+      const currentOpts = i === 0 ? { ...opts, ghost: true } : opts
+      const svg = prepareSvg(buildStrokeSvg(data.strokes, i, currentOpts))
+      cumulativeFolder.file(`${char}_累积_${String(i).padStart(2, '0')}.svg`, svg)
+    }
+
+    // 单独笔划子包（含 VBS 脚本）
+    const individualFolder = zip.folder(`${char}_单独笔划`)
+    if (!individualFolder) return
+    const zeroSvg = prepareSvg(buildStrokeSvg(data.strokes, 0, { ...opts, ghost: true }))
+    individualFolder.file(`${char}_00.svg`, zeroSvg)
+    for (let i = 0; i < data.strokes.length; i++) {
+      const svg = prepareSvg(buildIndividualStrokeSvg(data.strokes, i, opts))
+      individualFolder.file(`${char}_${String(i + 1).padStart(2, '0')}.svg`, svg)
+    }
+    individualFolder.file('1_双击我自动生成PPT动画.vbs', buildIndividualVbs())
 
     const blob = await zip.generateAsync({ type: 'blob' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${char}_单独笔划.zip`
+    a.download = `${char}_全部笔划.zip`
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 100)
   }
+
+  // 配置记录：去重比较 + 持久化
+  const isSameConfig = (a: ExportOptions, b: ExportOptions): boolean => {
+    return a.grid === b.grid
+      && a.ghost === b.ghost
+      && a.gridBorderColor === b.gridBorderColor
+      && a.gridBorderWidth === b.gridBorderWidth
+      && a.gridDashedColor === b.gridDashedColor
+      && a.gridDashedWidth === b.gridDashedWidth
+      && a.ghostColor === b.ghostColor
+      && a.strokeColor === b.strokeColor
+      && a.currentStrokeColor === b.currentStrokeColor
+  }
+
+  const persistConfigs = (configs: SavedConfig[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(configs))
+    } catch {
+      // 存储失败（quota / 隐私模式）静默忽略
+    }
+  }
+
+  // 保存当前配置（去重：已存在则仅更新时间戳并前移）
+  const saveCurrentConfig = () => {
+    const config = getExportOpts()
+    setSavedConfigs(prev => {
+      const existingIdx = prev.findIndex(s => isSameConfig(s.config, config))
+      let next: SavedConfig[]
+      if (existingIdx >= 0) {
+        next = [...prev]
+        next[existingIdx] = { ...next[existingIdx], timestamp: Date.now() }
+        // 把被更新的项移到最前
+        const updated = next.splice(existingIdx, 1)[0]
+        next = [updated, ...next]
+      } else {
+        next = [
+          {
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: Date.now(),
+            config
+          },
+          ...prev
+        ].slice(0, MAX_CONFIGS)
+      }
+      persistConfigs(next)
+      return next
+    })
+  }
+
+  // 应用某个已保存的配置
+  const applyConfig = (config: ExportOptions) => {
+    setExportWithGrid(config.grid)
+    setExportWithGhost(config.ghost)
+    setExportGridBorderColor(config.gridBorderColor)
+    setExportGridBorderWidth(config.gridBorderWidth)
+    setExportGridDashedColor(config.gridDashedColor)
+    setExportGridDashedWidth(config.gridDashedWidth)
+    setExportGhostColor(config.ghostColor)
+    setExportStrokeColor(config.strokeColor)
+    setExportCurrentStrokeColor(config.currentStrokeColor)
+  }
+
+  // 删除某个已保存的配置
+  const deleteConfig = (id: string) => {
+    setSavedConfigs(prev => {
+      const next = prev.filter(s => s.id !== id)
+      persistConfigs(next)
+      return next
+    })
+  }
+
+  // 标记客户端挂载完成（用于 hydration 一致性）
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // 初始化及颜色更新
   useEffect(() => {
     loadChar(char)
   }, [char, exportGhostColor, exportStrokeColor])
+
 
   return (
     <div className="min-h-screen ink-background relative overflow-hidden">
@@ -487,83 +672,81 @@ Next
       <div className="absolute top-0 right-0 w-1/4 h-24 opacity-10 cloud-pattern" />
       <div className="absolute bottom-0 left-1/4 w-1/3 h-28 opacity-10 cloud-pattern" />
 
-      {/* 主容器 */}
-      <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-12">
-
-        {/* 标题区域 - 卷轴风格 */}
-        <header className="text-center mb-10 animate-fade-in">
+      <div className="relative z-10 px-4 py-8 md:py-10">
+        {/* 右上角 GitHub 链接 */}
+        <a
+          href="https://github.com/liuxin2533/hanzi-writer"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub 仓库"
+          title="GitHub 仓库"
+          className="absolute top-2 right-2 md:top-4 md:right-4 text-ink-light hover:text-ink transition-colors z-20"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.4 3-.405 1.02.005 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+          </svg>
+        </a>
+        {/* 标题 - 全宽 */}
+        <header className="text-center mb-6 md:mb-8 animate-fade-in">
           <div className="inline-block relative">
-            {/* 上装饰 */}
-            <div className="w-48 h-1 bg-gradient-to-r from-transparent via-amber-800 to-transparent mb-4 mx-auto" />
-
-            <h1 className="text-5xl md:text-6xl font-calligraphy text-ink mb-2 tracking-wider">
+            <div className="w-48 h-1 bg-gradient-to-r from-transparent via-amber-800 to-transparent mb-3 mx-auto" />
+            <h1 className="text-4xl md:text-5xl font-calligraphy text-ink mb-1 tracking-wider">
               笔墨 · 习字
             </h1>
-
-            <p className="text-base text-ink-light font-light tracking-widest">
+            <p className="text-sm text-ink-light font-light tracking-widest">
               汉字笔顺 · 静心书写
             </p>
-
-            {/* 下装饰 */}
-            <div className="w-48 h-1 bg-gradient-to-r from-transparent via-amber-800 to-transparent mt-4 mx-auto" />
+            <div className="w-48 h-1 bg-gradient-to-r from-transparent via-amber-800 to-transparent mt-3 mx-auto" />
           </div>
         </header>
 
-        {/* 中央书写区域 */}
-        <div className="relative flex flex-col items-center">
+        {/* 左右分栏主内容 */}
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-6 md:gap-8 items-start">
+          {/* ============ 左侧：习字区 ============ */}
+          <div className="md:w-[480px] md:shrink-0 flex flex-col items-center w-full md:sticky md:top-4">
+            {/* 字符显示 - 屏风风格 */}
+            <div className="relative p-6 md:p-8 rounded-lg screen-frame animate-scale-in">
+              <div className="relative">
+                <div className="absolute inset-0 paper-texture rounded" />
 
-          {/* 外框装饰 - 屏风风格 */}
-          <div className="relative p-6 md:p-8 rounded-lg screen-frame animate-scale-in">
+                {exportWithGrid && (
+                  <svg className="absolute inset-0 w-[240px] h-[240px]" viewBox="0 0 240 240">
+                    <line x1="0" y1="120" x2="240" y2="120" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                    <line x1="120" y1="0" x2="120" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                    <line x1="0" y1="0" x2="240" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                    <line x1="240" y1="0" x2="0" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
+                    <rect
+                      x={exportGridBorderWidth / 2}
+                      y={exportGridBorderWidth / 2}
+                      width={240 - exportGridBorderWidth}
+                      height={240 - exportGridBorderWidth}
+                      fill="none"
+                      stroke={exportGridBorderColor}
+                      strokeOpacity="1"
+                      strokeWidth={exportGridBorderWidth}
+                      rx="4"
+                    />
+                  </svg>
+                )}
 
-            {/* 田字格容器 */}
-            <div className="relative">
-              {/* 宣纸纹理背景 */}
-              <div className="absolute inset-0 paper-texture rounded" />
-
-              {/* 田字格背景 */}
-              {exportWithGrid && (
-                <svg className="absolute inset-0 w-[240px] h-[240px]" viewBox="0 0 240 240">
-                  {/* 米字格中心线 */}
-                  <line x1="0" y1="120" x2="240" y2="120" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
-                  <line x1="120" y1="0" x2="120" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
-                  {/* 对角线 */}
-                  <line x1="0" y1="0" x2="240" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
-                  <line x1="240" y1="0" x2="0" y2="240" stroke={exportGridDashedColor} strokeOpacity="0.6" strokeWidth={exportGridDashedWidth} strokeDasharray="8 6" />
-                  {/* 外框 */}
-                  <rect
-                    x={exportGridBorderWidth / 2}
-                    y={exportGridBorderWidth / 2}
-                    width={240 - exportGridBorderWidth}
-                    height={240 - exportGridBorderWidth}
-                    fill="none"
-                    stroke={exportGridBorderColor}
-                    strokeOpacity="1"
-                    strokeWidth={exportGridBorderWidth}
-                    rx="4"
-                  />
-                </svg>
-              )}
-
-              {/* 汉字渲染区 */}
-              <div
-                ref={containerRef}
-                className="relative w-[240px] h-[240px] z-10"
-                id="hanzi-writer-container"
-              />
-              <style>{`
-                #hanzi-writer-container svg > g > g:nth-of-type(2) > path {
-                  stroke: ${exportStrokeColor} !important;
-                }
-                #hanzi-writer-container svg > g > g:nth-of-type(2) > path:nth-of-type(${currentStroke + 1}) {
-                  stroke: ${exportCurrentStrokeColor} !important;
-                }
-              `}</style>
+                <div
+                  ref={containerRef}
+                  className="relative w-[240px] h-[240px] z-10"
+                  id="hanzi-writer-container"
+                />
+                <style>{`
+                  #hanzi-writer-container svg > g > g:nth-of-type(2) > path {
+                    stroke: ${exportStrokeColor} !important;
+                  }
+                  #hanzi-writer-container svg > g > g:nth-of-type(2) > path:nth-of-type(${currentStroke + 1}) {
+                    stroke: ${exportCurrentStrokeColor} !important;
+                  }
+                `}</style>
+              </div>
             </div>
-          </div>
 
-          {/* 输入区域 - 印章风格 */}
-          <div className="mt-8 flex items-center gap-4 animate-slide-up">
-            <div className="relative">
+            {/* 输入区域 - 印章风格 */}
+            <div className="mt-6 flex items-center gap-4 animate-slide-up">
               <input
                 type="text"
                 value={inputChar}
@@ -573,269 +756,345 @@ Next
                 }}
                 onCompositionEnd={(e) => {
                   isComposingRef.current = false
-                  handleInputChange((e.target as HTMLInputElement).value)
+                  handleInputChange(e.currentTarget.value)
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && handleInput()}
-                placeholder="字"
+                placeholder="笔"
                 className="w-16 h-14 text-3xl text-center border-2 border-ink-light bg-transparent rounded-lg focus:border-cinnabar focus:outline-none transition-all placeholder:text-ink-light placeholder:opacity-40 font-calligraphy"
               />
+              <button
+                onClick={handleInput}
+                className="group relative px-6 py-3 overflow-hidden rounded-lg transition-all duration-300 hover:scale-105"
+              >
+                <div className="absolute inset-0 bg-cinnabar opacity-90 group-hover:opacity-100 transition-opacity" />
+                <span className="relative text-white font-medium tracking-wide">习字</span>
+              </button>
             </div>
-            <button
-              onClick={handleInput}
-              className="group relative px-6 py-3 overflow-hidden rounded-lg transition-all duration-300 hover:scale-105"
-            >
-              <div className="absolute inset-0 bg-cinnabar opacity-90 group-hover:opacity-100 transition-opacity" />
-              <span className="relative text-white font-medium tracking-wide">习字</span>
-            </button>
+
+            {/* 状态显示 */}
+            <div className="mt-6 flex items-center gap-6 text-sm animate-slide-up-delay">
+              <div className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full transition-all duration-500 ${state === 'idle' ? 'bg-ink-light opacity-50' :
+                    state === 'playing' ? 'bg-cinnabar animate-pulse-gentle' :
+                      state === 'paused' ? 'bg-amber-600' :
+                        'bg-jade'
+                  }`} />
+                <span className="text-ink-light font-light tracking-wide">
+                  {state === 'idle' ? '待命' : state === 'playing' ? '书写中' : state === 'paused' ? '已暂停' : '书毕'}
+                </span>
+              </div>
+              <div className="text-ink-light font-light tracking-wider">
+                <span className="opacity-70">笔划 </span>
+                <span className="font-medium text-ink">{currentStroke}</span>
+                <span className="opacity-50 mx-1">/</span>
+                <span>{totalStrokes}</span>
+              </div>
+            </div>
+
+            {/* 控制按钮组 - 印章风格 */}
+            <div className="flex flex-wrap justify-center gap-3 mt-6 animate-slide-up-delay-2">
+              {state === 'idle' ? (
+                <button
+                  onClick={startAnimation}
+                  disabled={totalStrokes === 0}
+                  className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-xl">▶</span>
+                  <span className="relative">起笔</span>
+                </button>
+              ) : (
+                <button
+                  onClick={resetState}
+                  disabled={totalStrokes === 0}
+                  className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-xl">↺</span>
+                  <span className="relative">重书</span>
+                </button>
+              )}
+
+              <button
+                onClick={togglePause}
+                disabled={state !== 'playing' && state !== 'paused'}
+                className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="text-xl">{isPaused ? '▶' : '⏸'}</span>
+                <span className="relative">{isPaused ? '续写' : '暂停'}</span>
+              </button>
+
+              <button
+                onClick={resetAndRestart}
+                disabled={state === 'idle'}
+                className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="text-xl">↻</span>
+                <span className="relative">复原</span>
+              </button>
+
+              <button
+                onClick={toggleLoop}
+                className={`stamp-btn group transition-all ${isLooping ? 'bg-jade bg-opacity-90 text-white' : ''}`}
+              >
+                <span className="text-xl">🔁</span>
+                <span className="relative">{isLooping ? '循环' : '周始'}</span>
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* 状态显示 - 毛笔信息条 */}
-        <div className="mt-8 flex items-center gap-8 text-sm animate-slide-up-delay">
-          <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full transition-all duration-500 ${state === 'idle' ? 'bg-ink-light opacity-50' :
-                state === 'playing' ? 'bg-cinnabar animate-pulse-gentle' :
-                  state === 'paused' ? 'bg-amber-600' :
-                    'bg-jade'
-              }`} />
-            <span className="text-ink-light font-light tracking-wide">
-              {state === 'idle' ? '待命' : state === 'playing' ? '书写中' : state === 'paused' ? '已暂停' : '书毕'}
-            </span>
+          {/* ============ 右侧：配置区 ============ */}
+          <div className="flex-1 w-full min-w-0">
+            <div className="p-4 md:p-6 bg-paper-dark rounded-lg border border-wood-light">
+              <h3 className="text-xl font-calligraphy text-ink mb-5 text-center tracking-wider">画面与导出配置</h3>
+
+              {/* 样式设置：两列 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+                {/* 田字格样式 */}
+                <div className="p-3 bg-paper rounded-lg border border-wood-light flex flex-col gap-2">
+                  <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-1.5 flex items-center gap-1.5">
+                    <span>田</span> 格线样式
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={exportWithGrid}
+                        onChange={(e) => setExportWithGrid(e.target.checked)}
+                        className="w-4 h-4 accent-cinnabar"
+                      />
+                      <span className="text-sm text-ink font-medium">启用格线</span>
+                    </label>
+                  </div>
+                  {exportWithGrid && (
+                    <div className="flex flex-col gap-2 mt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-ink-light">边框颜色</span>
+                        <input
+                          type="color"
+                          value={exportGridBorderColor}
+                          onChange={(e) => setExportGridBorderColor(e.target.value)}
+                          className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-ink-light">边框粗细 (px)</span>
+                        <input
+                          type="number"
+                          min="0.1"
+                          max="20"
+                          step="0.1"
+                          value={exportGridBorderWidth}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setExportGridBorderWidth(isNaN(val) ? 0 : val);
+                          }}
+                          className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-ink-light">虚线颜色</span>
+                        <input
+                          type="color"
+                          value={exportGridDashedColor}
+                          onChange={(e) => setExportGridDashedColor(e.target.value)}
+                          className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-ink-light">虚线粗细 (px)</span>
+                        <input
+                          type="number"
+                          min="0.1"
+                          max="20"
+                          step="0.1"
+                          value={exportGridDashedWidth}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setExportGridDashedWidth(isNaN(val) ? 0 : val);
+                          }}
+                          className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 笔划样式 */}
+                <div className="p-3 bg-paper rounded-lg border border-wood-light flex flex-col gap-2">
+                  <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-1.5 flex items-center gap-1.5">
+                    <span>笔</span> 墨迹与底字
+                  </h4>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-ink font-medium">常规笔划颜色</span>
+                    <input
+                      type="color"
+                      value={exportStrokeColor}
+                      onChange={(e) => setExportStrokeColor(e.target.value)}
+                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-ink font-medium">当前笔划颜色</span>
+                    <input
+                      type="color"
+                      value={exportCurrentStrokeColor}
+                      onChange={(e) => setExportCurrentStrokeColor(e.target.value)}
+                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={exportWithGhost}
+                        onChange={(e) => setExportWithGhost(e.target.checked)}
+                        className="w-4 h-4 accent-cinnabar"
+                      />
+                      <span className="text-sm text-ink font-medium">启用Ghost底字</span>
+                    </label>
+                  </div>
+                  {exportWithGhost && (
+                    <div className="flex items-center justify-between gap-2 mt-1 transition-all">
+                      <span className="text-xs text-ink-light">底字颜色</span>
+                      <input
+                        type="color"
+                        value={exportGhostColor}
+                        onChange={(e) => setExportGhostColor(e.target.value)}
+                        className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 笔划预览网格 */}
+              <div className="flex flex-wrap justify-center gap-3 mb-5">
+                {strokePaths.length > 0 && Array.from({ length: totalStrokes + 1 }, (_, i) => {
+                  const svgStr = buildStrokeSvg(strokePaths, i, getExportOpts())
+                  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`
+                  return (
+                    <div key={`${char}-${i}-${exportWithGrid}-${exportWithGhost}-${exportGridBorderColor}-${exportGridBorderWidth}-${exportGridDashedColor}-${exportGridDashedWidth}-${exportStrokeColor}-${exportCurrentStrokeColor}-${exportGhostColor}`} className="flex flex-col items-center gap-1.5">
+                      <div className="relative">
+                        <img
+                          src={dataUrl}
+                          width={64}
+                          height={64}
+                          alt={`${char} ${i}笔`}
+                          className="w-16 h-16 bg-paper border border-wood-light rounded cursor-pointer hover:border-cinnabar transition-colors"
+                        />
+                        <button
+                          onClick={() => downloadSingleStroke(i)}
+                          className="absolute -bottom-1 -right-1 w-5 h-5 bg-jade text-white text-xs rounded-full flex items-center justify-center hover:bg-jade-light transition-colors shadow"
+                        >
+                          ↓
+                        </button>
+                      </div>
+                      <span className="text-[10px] text-ink-light">{i}笔</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* 导出按钮 */}
+              <div className="flex flex-wrap justify-center gap-3">
+                <button
+                  onClick={exportAllStrokesZip}
+                  disabled={totalStrokes === 0}
+                  className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:bg-cinnabar-light transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <span>📦</span> 导出累积笔划 ZIP
+                </button>
+                <button
+                  onClick={exportAllIndividualStrokesZip}
+                  disabled={totalStrokes === 0}
+                  className="px-4 py-2 bg-ink text-white text-sm rounded-lg hover:bg-ink-light transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <span>📦</span> 导出单独笔划 ZIP
+                </button>
+                <button
+                  onClick={exportAllZip}
+                  disabled={totalStrokes === 0}
+                  className="px-4 py-2 bg-jade text-white text-sm rounded-lg hover:bg-jade-light transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <span>📦</span> 导出全部
+                </button>
+              </div>
+
+              {/* 配置记录 - 列表形式 */}
+              <div className="mt-5 pt-4 border-t border-wood-light">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-ink tracking-wider">配置记录</h4>
+                  <span className="text-xs text-ink-light opacity-60 font-mono">{mounted ? savedConfigs.length : 0}/{MAX_CONFIGS}</span>
+                </div>
+                {!mounted || savedConfigs.length === 0 ? (
+                  <p className="text-xs text-ink-light text-center opacity-60 py-4">{mounted ? '暂无记录，点击上方任意导出按钮即可自动保存当前配置' : '\u00A0'}</p>
+                ) : (
+                  <div className="divide-y divide-wood-light/50 -mx-2">
+                    {savedConfigs.map(s => {
+                      const tileSvg = buildStyleTileSvg(s.config)
+                      const tileUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(tileSvg)}`
+                      const c = s.config
+                      return (
+                        <div key={s.id} className="flex items-center gap-3 py-2 px-2 hover:bg-paper/40 rounded transition-colors">
+                          {/* 风格样片（不含具体汉字） */}
+                          <img
+                            src={tileUrl}
+                            alt="样式预览"
+                            className="w-12 h-12 rounded border border-wood-light bg-paper shrink-0"
+                          />
+
+                          {/* 颜色 + 状态 */}
+                          <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                            <div className="flex gap-1">
+                              <div title={`边框 ${c.gridBorderColor} ${c.gridBorderWidth}px`} style={{ background: c.gridBorderColor }} className="w-5 h-5 rounded border border-wood-light/50" />
+                              <div title={`虚线 ${c.gridDashedColor} ${c.gridDashedWidth}px`} style={{ background: c.gridDashedColor }} className="w-5 h-5 rounded border border-wood-light/50" />
+                              <div title={`笔划 ${c.strokeColor}`} style={{ background: c.strokeColor }} className="w-5 h-5 rounded border border-wood-light/50" />
+                              <div title={`当前 ${c.currentStrokeColor}`} style={{ background: c.currentStrokeColor }} className="w-5 h-5 rounded border border-wood-light/50" />
+                              <div title={`底字 ${c.ghostColor}`} style={{ background: c.ghostColor }} className="w-5 h-5 rounded border border-wood-light/50" />
+                            </div>
+                            <div className="flex gap-2 text-sm font-medium">
+                              <span className={c.grid ? 'text-ink' : 'text-ink-light line-through opacity-60'}>格线</span>
+                              <span className={c.ghost ? 'text-ink' : 'text-ink-light line-through opacity-60'}>底字</span>
+                              {!c.grid && !c.ghost && <span className="text-ink-light opacity-50">纯净</span>}
+                            </div>
+                          </div>
+
+                          {/* 时间 */}
+                          <span
+                            className="text-[11px] text-ink-light font-mono shrink-0"
+                            title={new Date(s.timestamp).toLocaleString('zh-CN')}
+                          >
+                            {formatTime(s.timestamp)}
+                          </span>
+
+                          {/* 操作 */}
+                          <div className="flex gap-1 shrink-0">
+                            <button
+                              onClick={() => applyConfig(c)}
+                              className="text-xs px-2 py-1 bg-jade text-white rounded hover:opacity-80 transition-opacity"
+                              title="应用此配置"
+                            >应用</button>
+                            <button
+                              onClick={() => deleteConfig(s.id)}
+                              className="text-xs w-7 h-7 bg-cinnabar text-white rounded hover:opacity-80 transition-opacity flex items-center justify-center leading-none"
+                              title="删除"
+                            >×</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-
-          <div className="text-ink-light font-light tracking-wider">
-            <span className="opacity-70">笔划 </span>
-            <span className="font-medium text-ink">{currentStroke}</span>
-            <span className="opacity-50 mx-1">/</span>
-            <span>{totalStrokes}</span>
-          </div>
-        </div>
-
-        {/* 控制按钮组 - 印章风格 */}
-        <div className="flex flex-wrap justify-center gap-3 mt-8 animate-slide-up-delay-2">
-          {state === 'idle' ? (
-            <button
-              onClick={startAnimation}
-              disabled={totalStrokes === 0}
-              className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <span className="text-xl">▶</span>
-              <span className="relative">起笔</span>
-            </button>
-          ) : (
-            <button
-              onClick={resetState}
-              disabled={totalStrokes === 0}
-              className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <span className="text-xl">↺</span>
-              <span className="relative">重书</span>
-            </button>
-          )}
-
-          <button
-            onClick={togglePause}
-            disabled={state !== 'playing' && state !== 'paused'}
-            className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span className="text-xl">{isPaused ? '▶' : '⏸'}</span>
-            <span className="relative">{isPaused ? '续写' : '暂停'}</span>
-          </button>
-
-          <button
-            onClick={resetAndRestart}
-            disabled={state === 'idle'}
-            className="stamp-btn group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span className="text-xl">↻</span>
-            <span className="relative">复原</span>
-          </button>
-
-          <button
-            onClick={toggleLoop}
-            className={`stamp-btn group transition-all ${isLooping ? 'bg-jade bg-opacity-90 text-white' : ''}`}
-          >
-            <span className="text-xl">🔁</span>
-            <span className="relative">{isLooping ? '循环' : '周始'}</span>
-          </button>
         </div>
 
         {/* 底部装饰诗句 */}
-        <footer className="mt-12 text-center animate-fade-in-delay">
+        <footer className="mt-10 text-center animate-fade-in-delay">
           <p className="text-sm text-ink-light opacity-60 font-light tracking-widest">
             笔落惊风雨，诗成泣鬼神
           </p>
         </footer>
-
-        {/* 导出与画面样式配置 */}
-        <div className="mt-8 p-6 bg-paper-dark rounded-lg border border-wood-light w-full max-w-2xl animate-slide-up-delay-2">
-          <h3 className="text-xl font-calligraphy text-ink mb-6 text-center tracking-wider">画面与导出配置</h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            {/* 田字格样式 */}
-            <div className="p-4 bg-paper rounded-lg border border-wood-light flex flex-col gap-3">
-              <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-2 flex items-center gap-1.5">
-                <span>田</span> 格线样式
-              </h4>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={exportWithGrid}
-                    onChange={(e) => setExportWithGrid(e.target.checked)}
-                    className="w-4 h-4 accent-cinnabar"
-                  />
-                  <span className="text-sm text-ink font-medium">启用格线</span>
-                </label>
-              </div>
-              {exportWithGrid && (
-                <div className="flex flex-col gap-3 mt-1">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-ink-light">边框颜色</span>
-                    <input
-                      type="color"
-                      value={exportGridBorderColor}
-                      onChange={(e) => setExportGridBorderColor(e.target.value)}
-                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-ink-light">边框粗细 (px)</span>
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={exportGridBorderWidth}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setExportGridBorderWidth(isNaN(val) ? 0 : val);
-                      }}
-                      className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-ink-light">虚线颜色</span>
-                    <input
-                      type="color"
-                      value={exportGridDashedColor}
-                      onChange={(e) => setExportGridDashedColor(e.target.value)}
-                      className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs text-ink-light">虚线粗细 (px)</span>
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="20"
-                      step="0.1"
-                      value={exportGridDashedWidth}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setExportGridDashedWidth(isNaN(val) ? 0 : val);
-                      }}
-                      className="w-16 px-2 py-0.5 text-xs text-center border border-wood-light bg-paper rounded focus:border-cinnabar focus:outline-none text-ink font-mono"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 笔划样式 */}
-            <div className="p-4 bg-paper rounded-lg border border-wood-light flex flex-col gap-3">
-              <h4 className="text-sm font-semibold text-ink border-b border-wood-light pb-2 flex items-center gap-1.5">
-                <span>笔</span> 墨迹与底字
-              </h4>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-ink font-medium">常规笔划颜色</span>
-                <input
-                  type="color"
-                  value={exportStrokeColor}
-                  onChange={(e) => setExportStrokeColor(e.target.value)}
-                  className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-ink font-medium">当前笔划颜色</span>
-                <input
-                  type="color"
-                  value={exportCurrentStrokeColor}
-                  onChange={(e) => setExportCurrentStrokeColor(e.target.value)}
-                  className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
-                />
-              </div>
-              <div className="flex items-center gap-2 mt-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={exportWithGhost}
-                    onChange={(e) => setExportWithGhost(e.target.checked)}
-                    className="w-4 h-4 accent-cinnabar"
-                  />
-                  <span className="text-sm text-ink font-medium">启用Ghost底字</span>
-                </label>
-              </div>
-              {exportWithGhost && (
-                <div className="flex items-center justify-between gap-4 mt-1 transition-all">
-                  <span className="text-xs text-ink-light">底字颜色</span>
-                  <input
-                    type="color"
-                    value={exportGhostColor}
-                    onChange={(e) => setExportGhostColor(e.target.value)}
-                    className="w-8 h-6 p-0 border border-wood-light rounded cursor-pointer bg-transparent"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 笔划预览网格（与导出效果一致） */}
-          <div className="flex flex-wrap justify-center gap-4 mb-6">
-            {strokePaths.length > 0 && Array.from({ length: totalStrokes + 1 }, (_, i) => {
-              const svgStr = buildStrokeSvg(strokePaths, i, getExportOpts())
-              const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`
-              return (
-                <div key={`${char}-${i}-${exportWithGrid}-${exportWithGhost}-${exportGridBorderColor}-${exportGridBorderWidth}-${exportGridDashedColor}-${exportGridDashedWidth}-${exportStrokeColor}-${exportCurrentStrokeColor}-${exportGhostColor}`} className="flex flex-col items-center gap-2">
-                  <div className="relative">
-                    <img
-                      src={dataUrl}
-                      width={80}
-                      height={80}
-                      alt={`${char} ${i}笔`}
-                      className="w-20 h-20 bg-paper border border-wood-light rounded cursor-pointer hover:border-cinnabar transition-colors"
-                    />
-                    <button
-                      onClick={() => downloadSingleStroke(i)}
-                      className="absolute -bottom-1 -right-1 w-6 h-6 bg-jade text-white text-xs rounded-full flex items-center justify-center hover:bg-jade-light transition-colors shadow"
-                    >
-                      ↓
-                    </button>
-                  </div>
-                  <span className="text-xs text-ink-light">{i}笔</span>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* 导出按钮 */}
-          <div className="flex flex-wrap justify-center gap-4">
-            <button
-              onClick={exportAllStrokesZip}
-              disabled={totalStrokes === 0}
-              className="px-5 py-2.5 bg-cinnabar text-white text-sm rounded-lg hover:bg-cinnabar-light transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              <span>📦</span> 导出累积笔划 ZIP
-            </button>
-            <button
-              onClick={exportAllIndividualStrokesZip}
-              disabled={totalStrokes === 0}
-              className="px-5 py-2.5 bg-ink text-white text-sm rounded-lg hover:bg-ink-light transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              <span>📦</span> 导出单独笔划 ZIP
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   )
