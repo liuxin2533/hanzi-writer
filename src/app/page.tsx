@@ -522,6 +522,7 @@ End If
 For i = 0 To count - 1
     fullPath = strFolder & "\\" & arrFiles(i)
     Set shape = objSlide.Shapes.AddPicture(fullPath, 0, -1, leftPos, topPos, size, size)
+    shape.Name = arrFiles(i)
 
     If InStr(arrFiles(i), "_00.svg") > 0 Then
         ' Background image, no animation needed
