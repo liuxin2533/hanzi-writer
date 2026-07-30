@@ -109,7 +109,7 @@ git diff -- src/app/page.tsx package.json tests/vbs-shape-naming.test.mjs
 
 Expected: no whitespace errors; the implementation diff only adds the test command, regression test, and the VBS shape-name assignment.
 
-- [ ] **Step 5: Commit the implementation**
+- [x] **Step 5: Commit the implementation**
 
 ```bash
 git add src/app/page.tsx package.json tests/vbs-shape-naming.test.mjs docs/superpowers/plans/2026-07-30-ppt-shape-svg-filename.md
