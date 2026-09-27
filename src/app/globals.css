@@ -3,7 +3,6 @@
 /* PPT workshop follows the paper, ink and cinnabar palette of the writing desk. */
 .ppt-panel { background: #faf7ef; border: 1px solid #c5b599; border-top: 4px solid #8b7355; border-radius: 8px; padding: 28px; box-shadow: 0 8px 28px #5c403308; }
 .ppt-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
-.ppt-eyebrow { color: #a14739; font-size: 12px; letter-spacing: .22em; }
 .ppt-panel h2 { font-size: 26px; letter-spacing: .08em; margin: 6px 0 10px; }
 .ppt-heading p { color: #726552; font-size: 14px; line-height: 1.7; }
 .ppt-panel button, .ppt-panel select, .ppt-panel input { font: inherit; }

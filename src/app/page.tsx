@@ -1026,7 +1026,7 @@ Next
 
               {/* 导出按钮 */}
               <div className="flex flex-wrap justify-center gap-3">
-                <a href="#ppt-workshop" className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:opacity-90 transition-opacity">制作笔顺动画 PPT ↓</a>
+                <a href="#ppt-workshop" className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:opacity-90 transition-opacity">下载PPT</a>
                 <button
                   onClick={exportAllStrokesZip}
                   disabled={totalStrokes === 0}

@@ -126,7 +126,8 @@ export function detectCuts(median: Point[]): number[] {
   for (let i = 1; i < indices.length - 1; i++) {
     const a = median[indices[i - 1]], b = median[indices[i]], c = median[indices[i + 1]]
     const fraction = lengths[indices[i]] / total
-    // Changes of the dominant axis also capture gradual arcs, not just sharp corners.
+    // Axis changes locate candidates on both sharp corners and gradual arcs.
+    // They are not sufficient evidence of a turn (a dot can cross 45 degrees).
     if (directionBetween(a, b) !== directionBetween(b, c) &&
       fraction - (cuts.at(-1) ?? 0) >= MIN_CUT_GAP && 1 - fraction >= MIN_CUT_GAP) cuts.push(fraction)
   }
@@ -135,7 +136,15 @@ export function detectCuts(median: Point[]): number[] {
   if (cuts.length && (1 - cuts[cuts.length - 1]) * total < 45) cuts.pop()
   for (let i = 0; i < cuts.length;) {
     const a = pointAt(median, cuts[i - 1] ?? 0), b = pointAt(median, cuts[i]), c = pointAt(median, cuts[i + 1] ?? 1)
-    if (directionBetween(a, b) === directionBetween(b, c) || distance(a, b) < 25) cuts.splice(i, 1)
+    const cosine = ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])) /
+      (distance(a, b) * distance(b, c) || 1)
+    const gentle = cosine > Math.cos(50 * Math.PI / 180)
+    if (directionBetween(a, b) === directionBetween(b, c) || distance(a, b) < 25 ||
+      (gentle && canWipeTogether(median, cuts[i - 1] ?? 0, cuts[i + 1] ?? 1))) {
+      cuts.splice(i, 1)
+      // Recheck the preceding boundary against the newly joined span.
+      i = Math.max(0, i - 1)
+    }
     else i++
   }
   return cuts
@@ -144,6 +153,30 @@ export function detectCuts(median: Point[]): number[] {
 function directionBetween(a: Point, b: Point): Direction {
   const dx = b[0] - a[0], dy = b[1] - a[1]
   return Math.abs(dx) > Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'down' : 'up')
+}
+
+function wholeStrokeDirection(a: Point, b: Point): Direction {
+  const dx = b[0] - a[0], dy = b[1] - a[1]
+  // A vertical wipe follows dots and diagonal strokes in writing order, even
+  // when their horizontal extent is slightly larger. Shallow strokes stay horizontal.
+  return Math.abs(dy) >= Math.abs(dx) * 0.5 ? (dy >= 0 ? 'down' : 'up') : (dx >= 0 ? 'right' : 'left')
+}
+
+function canWipeTogether(median: Point[], start: number, end: number) {
+  const a = pointAt(median, start), b = pointAt(median, end)
+  const direction = wholeStrokeDirection(a, b)
+  const axis = direction === 'left' || direction === 'right' ? 0 : 1
+  const sign = direction === 'left' || direction === 'up' ? -1 : 1
+  const lengths = distances(median), total = lengths.at(-1)!
+  const points = [a, ...median.filter((_, i) => lengths[i] > start * total && lengths[i] < end * total), b]
+  let furthest = a[axis] * sign
+  // Tolerate small median wiggles, but never merge a hook that doubles back.
+  for (const point of points) {
+    const progress = point[axis] * sign
+    if (furthest - progress > 10) return false
+    furthest = Math.max(furthest, progress)
+  }
+  return true
 }
 
 export function analyzeCharacter(data: CharacterData): StrokeModel[] {
@@ -163,7 +196,7 @@ export function defaultSettings(model: StrokeModel, cuts = model.cuts): StrokeSe
   const directions: Direction[] = [], durations: number[] = []
   for (let i = 0; i < stops.length - 1; i++) {
     const a = pointAt(model.median, stops[i]), b = pointAt(model.median, stops[i + 1])
-    directions.push(directionBetween(a, b))
+    directions.push(cuts.length ? directionBetween(a, b) : wholeStrokeDirection(a, b))
     durations.push(Math.max(150, Math.round(total * (stops[i + 1] - stops[i]) / 0.5)))
   }
   return { cuts: [...cuts], directions, durations }

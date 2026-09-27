@@ -26,6 +26,10 @@ for (const character of ['弯', '心']) {
     const effects = nodes('animEffect')
     assert.equal(effects.length, segments.length)
     const shapes = new Map(nodes('cNvPr').map(n => [n.getAttribute('id'), n.getAttribute('name')]))
+    if (character === '弯') {
+      assert.deepEqual([...shapes.values()].filter(name => name.startsWith('hanzi-stroke-1-part-')), ['hanzi-stroke-1-part-1'])
+      assert.equal(effects[0].getAttribute('filter'), 'wipe(up)', 'the whole first dot wipes from the top edge')
+    }
     effects.forEach((effect, i) => {
       const originEdge = { down: 'up', up: 'down', right: 'left', left: 'right' }
       assert.equal(effect.getAttribute('filter'), `wipe(${originEdge[segments[i].direction]})`)

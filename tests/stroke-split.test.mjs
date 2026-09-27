@@ -2,9 +2,38 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import test from 'node:test'
 import clipping from 'polygon-clipping'
-import { analyzeCharacter, defaultSettings, splitStroke, geometryArea, flattenOutline, validSettings, animationTimeline } from '../src/lib/stroke-split.ts'
+import { analyzeCharacter, defaultSettings, detectCuts, splitStroke, geometryArea, flattenOutline, validSettings, animationTimeline } from '../src/lib/stroke-split.ts'
 
 export const fixture = character => JSON.parse(readFileSync(new URL(`./fixtures/${character}.json`, import.meta.url), 'utf8'))
+
+test('弯 first dot stays whole and wipes from top to bottom', () => {
+  const data = fixture('弯')
+  const [dot] = analyzeCharacter({ strokes: [data.strokes[0]], medians: [data.medians[0]] })
+  const parts = splitStroke(dot, defaultSettings(dot))
+  assert.equal(parts.length, 1, 'a gently curving dot does not need a cut')
+  assert.equal(parts[0].direction, 'down')
+})
+
+test('ordinary dots and falling strokes stay whole across different characters', () => {
+  for (const [character, strokes] of [['弯', [0, 4, 5]], ['心', [0, 2, 3]], ['永', [0, 4]], ['笔', [0, 2, 3, 5]]]) {
+    const models = analyzeCharacter(fixture(character))
+    for (const stroke of strokes) {
+      const parts = splitStroke(models[stroke], defaultSettings(models[stroke]), stroke)
+      assert.deepEqual(parts.map(p => p.direction), ['down'], `${character} stroke ${stroke + 1}`)
+    }
+  }
+})
+
+test('gentle diagonal bends stay whole at different sizes; real corners still split', () => {
+  for (const scale of [1, 2, 4]) {
+    const dot = [[0, 0], [85, 40], [117, 76]].map(([x, y]) => [x * scale, y * scale])
+    assert.deepEqual(detectCuts(dot), [])
+  }
+  for (const vertical of [-80, 80]) {
+    assert.deepEqual(detectCuts([[0, 0], [80, 0], [80, vertical]]), [0.5])
+  }
+  assert.deepEqual(detectCuts([[0, 0], [80, 0], [80, 80], [0, 80]]), [1 / 3, 2 / 3])
+})
 
 for (const character of ['口', '弯', '乙', '心', '永', '笔']) {
   test(`${character}: split pieces cover the original without overlapping and retain stroke order`, () => {
@@ -29,6 +58,17 @@ test('口 horizontal turn and 弯 final stroke have the expected writing directi
   assert.deepEqual(defaultSettings(mouth[1]).directions, ['right', 'down'])
   const bend = analyzeCharacter(fixture('弯'))
   assert.deepEqual(defaultSettings(bend.at(-1)).directions, ['down', 'right', 'down', 'left'])
+})
+
+test('curved hooks retain their changes of writing direction', () => {
+  for (const [character, stroke, directions] of [
+    ['心', 1, ['down', 'right', 'up']],
+    ['乙', 0, ['right', 'down', 'right', 'up']],
+    ['笔', 9, ['down', 'right', 'up']],
+  ]) {
+    const model = analyzeCharacter(fixture(character))[stroke]
+    assert.deepEqual(defaultSettings(model).directions, directions, character)
+  }
 })
 
 test('manual cuts, directions and timing work; malformed saved settings are rejected', () => {

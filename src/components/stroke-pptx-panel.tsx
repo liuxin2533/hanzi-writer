@@ -39,7 +39,7 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
   const [elapsed, setElapsed] = useState<number | null>(null)
   const [scope, setScope] = useState<'all' | 'stroke'>('all')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState(initial.restored ? '已载入这个字的已保存调整' : '')
+  const [message, setMessage] = useState(initial.restored ? '已载入这个字的已保存调整。如需重新自动拆分，可在“调整分段”中恢复整字。' : '')
   const [exportError, setExportError] = useState('')
   const dragging = useRef<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -75,6 +75,12 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
     setExportError('')
   }
   const updateCuts = (cuts: number[]) => update(defaultSettings(models[selected], cuts))
+  const resetAll = () => {
+    stop()
+    setSettings(models.map(model => defaultSettings(model)))
+    setMessage('已恢复整字自动拆分，可保存这个字的调整')
+    setExportError('')
+  }
   const moveCut = (index: number, value: number) => {
     const cuts = [...settings[selected].cuts]
     cuts[index] = Math.max((cuts[index - 1] ?? 0) + MIN_CUT_GAP, Math.min((cuts[index + 1] ?? 1) - MIN_CUT_GAP, value))
@@ -121,7 +127,7 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
 
   return <section className="ppt-panel" aria-labelledby="ppt-heading">
     <div className="ppt-heading">
-      <div><span className="ppt-eyebrow">课件工坊</span><h2 id="ppt-heading">一字一页，落笔有序</h2><p>自动拆分转弯，下载带擦除动画的 PowerPoint。</p></div>
+      <div><h2 id="ppt-heading">一字一页，落笔有序</h2><p>自动拆分转弯，下载带擦除动画的 PowerPoint。</p></div>
       <button className="ppt-primary" onClick={download} disabled={busy || !!result.error}>{busy ? '正在生成…' : '↓ 下载笔顺 PPT'}</button>
     </div>
     <div className="ppt-summary"><span><b>{models.length}</b> 笔</span><span><b>{result.segments.length}</b> 个动画片段</span><span>约 <b>{(allTime / 1000).toFixed(1)}</b> 秒</span><span className="ppt-summary-note">单页 · 矢量 · 自动播放</span></div>
@@ -179,7 +185,7 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
         {editing && <div className="ppt-cut-editor"><div className="ppt-control-title"><span>切分位置</span><button className="ppt-text-button" onClick={addCut} disabled={settings[selected].cuts.length >= 30}>＋ 添加切点</button></div>
           <p>拖动图中圆点或滑块调整。增删切点会重新计算本笔方向和时长。</p>
           {settings[selected].cuts.map((cut, i) => <div className="ppt-cut-row" key={i}><span>{i + 1}</span><input type="range" aria-label={`切点 ${i + 1} 位置`} min={((settings[selected].cuts[i - 1] ?? 0) + MIN_CUT_GAP) * 100} max={((settings[selected].cuts[i + 1] ?? 1) - MIN_CUT_GAP) * 100} step="0.1" value={cut * 100} onChange={e => moveCut(i, Number(e.target.value) / 100)} /><span>{Math.round(cut * 100)}%</span><button aria-label={`删除切点 ${i + 1}`} onClick={() => updateCuts(settings[selected].cuts.filter((_, j) => i !== j))}>×</button></div>)}
-          <div className="ppt-actions"><button onClick={() => play('stroke')} disabled={playing || !!result.error}>▶ 预览本笔</button><button onClick={() => update(defaultSettings(models[selected]))}>恢复本笔自动拆分</button><button onClick={save} disabled={!!result.error}>保存这个字的调整</button></div>
+          <div className="ppt-actions"><button onClick={() => play('stroke')} disabled={playing || !!result.error}>▶ 预览本笔</button><button onClick={() => update(defaultSettings(models[selected]))}>恢复本笔自动拆分</button><button onClick={resetAll}>恢复整字自动拆分</button><button onClick={save} disabled={!!result.error}>保存这个字的调整</button></div>
         </div>}
         <div className="ppt-playback-settings"><label>播放速度<select value={speed} onChange={e => { stop(); setSpeed(Number(e.target.value)) }}><option value="0.5">0.5× 慢速</option><option value="1">1× 正常</option><option value="1.5">1.5×</option><option value="2">2× 快速</option></select></label>
           <label>笔间停顿<select value={gap} onChange={e => { stop(); setGap(Number(e.target.value)) }}><option value="0">不停顿</option><option value="180">0.18 秒</option><option value="350">0.35 秒</option><option value="600">0.6 秒</option></select></label></div>
