@@ -1,10 +1,17 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react'
 import HanziWriter from 'hanzi-writer'
 import JSZip from 'jszip'
+import dynamic from 'next/dynamic'
+import type { CharacterData } from '@/lib/stroke-split'
+
+const StrokePptxPanel = dynamic(() => import('@/components/stroke-pptx-panel'), {
+  loading: () => <p className="ppt-status">正在加载 PPT 工坊…</p>,
+})
 
 type AnimationState = 'idle' | 'playing' | 'paused' | 'complete'
+const subscribeHydration = () => () => {}
 
 export default function Home() {
   const [char, setChar] = useState('笔')
@@ -24,10 +31,14 @@ export default function Home() {
   const [exportCurrentStrokeColor, setExportCurrentStrokeColor] = useState('#c41e3a') // 默认当前笔划颜色 (朱砂红)
   const [exportGhostColor, setExportGhostColor] = useState('#d4c5b0') // 默认浅古沙色
   const [strokePaths, setStrokePaths] = useState<string[]>([])
+  const [loadedCharacter, setLoadedCharacter] = useState<{ character: string; data: CharacterData } | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
+  const loadIdRef = useRef(0)
   const STORAGE_KEY = 'hanzi_export_configs'
   const MAX_CONFIGS = 20
   // 挂载标记：避免 SSR 与客户端 localStorage 读取结果不一致导致 hydration 不匹配
-  const [mounted, setMounted] = useState(false)
+  const mounted = useSyncExternalStore(subscribeHydration, () => true, () => false)
   // 懒初始化：仅在挂载时同步读取一次 localStorage
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>(() => {
     try {
@@ -70,15 +81,18 @@ export default function Home() {
     if (isComposingRef.current) {
       setInputChar(val) // 拼音输入中，允许展示完整字母（如 yong）
     } else {
-      setInputChar(val.trim().slice(-1)) // 非拼音输入状态下（如直接输入、粘贴），强制只留最后一个字符
+      setInputChar(Array.from(val.trim()).at(-1) ?? '') // 保留完整 Unicode 字符
     }
   }
 
   // 初始化汉字
   const loadChar = (newChar: string) => {
     if (!newChar.trim()) return
-
-    setChar(newChar)
+    const loadId = ++loadIdRef.current
+    setLoadedCharacter(null)
+    setLoadError('')
+    setTotalStrokes(0)
+    setStrokePaths([])
     setState('idle')
     setCurrentStroke(0)
     animatingRef.current = false
@@ -95,7 +109,9 @@ export default function Home() {
     }
 
     // 创建新的 writer 实例 - 水墨风格 (Ghost 轮廓颜色绑定 exportGhostColor)
+    const dataPromise = HanziWriter.loadCharacterData(newChar)
     const writer = HanziWriter.create(containerRef.current!, newChar, {
+      charDataLoader: (_character, onLoad, onError) => { dataPromise.then(data => { if (data) onLoad(data); else onError() }, onError) },
       width: 240,
       height: 240,
       padding: 20,
@@ -113,11 +129,16 @@ export default function Home() {
     writerRef.current = writer
 
     // 获取笔划数据
-    HanziWriter.loadCharacterData(newChar).then((data) => {
+    dataPromise.then((data) => {
+      if (loadId !== loadIdRef.current) return
       if (data && 'strokes' in data) {
         setTotalStrokes(data.strokes.length)
         setStrokePaths(data.strokes)
+        setLoadedCharacter({ character: newChar, data })
       }
+    }).catch(() => {
+      if (loadId !== loadIdRef.current) return
+      setLoadError(`暂时无法加载“${newChar}”的笔画数据，请检查网络或换一个汉字。`)
     })
   }
 
@@ -125,8 +146,9 @@ export default function Home() {
   const handleInput = () => {
     const trimmed = inputChar.trim()
     if (trimmed) {
-      const targetChar = trimmed.slice(-1) // 提取最后一个字符（适用于输入完词组后提取字）
-      loadChar(targetChar)
+      const targetChar = Array.from(trimmed).at(-1)!
+      if (targetChar === char) setReload(value => value + 1)
+      else setChar(targetChar)
       setInputChar(targetChar) // 将输入框回填为单字，保持界面整洁
     }
   }
@@ -655,15 +677,21 @@ Next
     })
   }
 
-  // 标记客户端挂载完成（用于 hydration 一致性）
+  // 每次换字只加载一次数据；序号阻止旧请求覆盖当前字。
   useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  // 初始化及颜色更新
-  useEffect(() => {
+    // 同步清空旧字的下载数据，再启动外部 Hanzi Writer 的异步加载。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadChar(char)
-  }, [char, exportGhostColor, exportStrokeColor])
+    const requestId = loadIdRef.current
+    return () => { loadIdRef.current = requestId + 1; animatingRef.current = false }
+    // 颜色通过下方效果更新，避免重载字形并丢失尚未保存的拆分设置。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [char, reload])
+
+  useEffect(() => {
+    writerRef.current?.updateColor('outlineColor', exportGhostColor)
+    writerRef.current?.updateColor('strokeColor', exportStrokeColor)
+  }, [exportGhostColor, exportStrokeColor, loadedCharacter])
 
 
   return (
@@ -750,6 +778,7 @@ Next
             <div className="mt-6 flex items-center gap-4 animate-slide-up">
               <input
                 type="text"
+                aria-label="输入汉字"
                 value={inputChar}
                 onChange={(e) => handleInputChange(e.target.value)}
                 onCompositionStart={() => {
@@ -759,7 +788,7 @@ Next
                   isComposingRef.current = false
                   handleInputChange(e.currentTarget.value)
                 }}
-                onKeyDown={(e) => e.key === 'Enter' && handleInput()}
+                onKeyDown={(e) => e.key === 'Enter' && !isComposingRef.current && !e.nativeEvent.isComposing && handleInput()}
                 placeholder="笔"
                 className="w-16 h-14 text-3xl text-center border-2 border-ink-light bg-transparent rounded-lg focus:border-cinnabar focus:outline-none transition-all placeholder:text-ink-light placeholder:opacity-40 font-calligraphy"
               />
@@ -997,6 +1026,7 @@ Next
 
               {/* 导出按钮 */}
               <div className="flex flex-wrap justify-center gap-3">
+                <a href="#ppt-workshop" className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:opacity-90 transition-opacity">制作笔顺动画 PPT ↓</a>
                 <button
                   onClick={exportAllStrokesZip}
                   disabled={totalStrokes === 0}
@@ -1088,6 +1118,12 @@ Next
               </div>
             </div>
           </div>
+        </div>
+
+        <div id="ppt-workshop" className="max-w-7xl mx-auto mt-8 scroll-mt-4">
+          {loadedCharacter?.character === char ? <StrokePptxPanel character={char} data={loadedCharacter.data} style={getExportOpts()} /> :
+            <div className="ppt-panel"><h2>笔顺动画 PPT</h2><p role={loadError ? 'alert' : 'status'}>{loadError || '正在读取汉字笔画，稍后即可预览并下载动画 PPT…'}</p>
+              {loadError && <button className="ppt-primary" onClick={() => setReload(value => value + 1)}>重试加载</button>}</div>}
         </div>
 
         {/* 底部装饰诗句 */}

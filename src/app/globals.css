@@ -1,5 +1,71 @@
 @import "tailwindcss";
 
+/* PPT workshop follows the paper, ink and cinnabar palette of the writing desk. */
+.ppt-panel { background: #faf7ef; border: 1px solid #c5b599; border-top: 4px solid #8b7355; border-radius: 8px; padding: 28px; box-shadow: 0 8px 28px #5c403308; }
+.ppt-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.ppt-eyebrow { color: #a14739; font-size: 12px; letter-spacing: .22em; }
+.ppt-panel h2 { font-size: 26px; letter-spacing: .08em; margin: 6px 0 10px; }
+.ppt-heading p { color: #726552; font-size: 14px; line-height: 1.7; }
+.ppt-panel button, .ppt-panel select, .ppt-panel input { font: inherit; }
+.ppt-panel button { cursor: pointer; transition: background .15s, border-color .15s; }
+.ppt-panel button:disabled { opacity: .45; cursor: not-allowed; }
+.ppt-panel :is(button, select, input):focus-visible { outline: 2px solid #a14739; outline-offset: 3px; }
+.ppt-panel button.ppt-primary { padding: 13px 22px; background: #a92c3e; color: #fffaf0; border-radius: 5px; border: 1px solid #922637; font-size: 15px; white-space: nowrap; }
+.ppt-primary:hover:not(:disabled) { background: #922637; }
+.ppt-summary { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; padding: 18px 0; margin: 18px 0 24px; border-block: 1px solid #ded3c0; color: #726552; font-size: 13px; }
+.ppt-summary b { font-size: 19px; color: #443728; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ppt-summary-note { margin-left: auto; letter-spacing: .06em; }
+.ppt-workspace { display: grid; grid-template-columns: minmax(240px, .9fr) minmax(300px, 1.3fr); gap: 36px; }
+.ppt-preview-column { max-width: 410px; width: 100%; justify-self: center; }
+.ppt-preview { background: #fffcf5; padding: 14px; border: 1px solid #ded3c0; }
+.ppt-preview svg { display: block; width: 100%; aspect-ratio: 1; overflow: visible; }
+.ppt-preview-caption { color: #7c705f; font-size: 12px; text-align: center; margin: 12px 0; }
+.ppt-cut-handle { cursor: grab; touch-action: none; }
+.ppt-cut-handle:active { cursor: grabbing; }
+.ppt-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.ppt-actions button { border: 1px solid #c5b599; background: transparent; padding: 7px 12px; border-radius: 4px; font-size: 12px; color: #594935; }
+.ppt-actions button:hover:not(:disabled) { background: #eee5d3; }
+.ppt-control-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.ppt-control-title h3 { font-size: 17px; }
+.ppt-text-button { font-size: 12px !important; color: #a92c3e; text-decoration: underline; text-underline-offset: 4px; }
+.ppt-stroke-list { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+.ppt-stroke-list button { width: 49px; padding: 4px; border: 1px solid #dacdb6; border-radius: 4px; color: #726552; background: #f3eddf; font-size: 11px; }
+.ppt-stroke-list button.active { border-color: #a92c3e; color: #a92c3e; background: #f9eae5; box-shadow: inset 0 -2px #a92c3e; }
+.ppt-stroke-list svg { width: 35px; height: 35px; margin-inline: auto; }
+.ppt-part-list { border-block: 1px solid #ded3c0; }
+.ppt-part-row { display: flex; align-items: center; gap: 18px; padding: 10px 2px; font-size: 13px; }
+.ppt-part-row + .ppt-part-row { border-top: 1px solid #e9e1d2; }
+.ppt-part-number { min-width: 58px; font-variant-numeric: tabular-nums; }
+.ppt-part-number span { color: #726552; }
+.ppt-part-time { margin-left: auto; color: #8b7e6b; font-variant-numeric: tabular-nums; }
+.ppt-panel select, .ppt-duration input { background: #fffcf5; color: #594935; border: 1px solid #c5b599; border-radius: 4px; padding: 6px 8px; font-size: 13px; max-width: 100%; }
+.ppt-duration { display: flex; align-items: center; gap: 5px; margin-left: auto; color: #8b7e6b; }
+.ppt-duration input { width: 80px; }
+.ppt-cut-editor { background: #f1ebde; border-radius: 5px; padding: 15px; margin-top: 16px; }
+.ppt-cut-editor p { font-size: 11px; color: #867761; line-height: 1.6; margin-bottom: 12px; }
+.ppt-cut-row { display: flex; gap: 10px; align-items: center; margin: 12px 0; font-size: 12px; color: #726552; }
+.ppt-cut-row input { flex: 1; width: 0; accent-color: #a92c3e; }
+.ppt-cut-row button { border: 1px solid #c5b599; width: 25px; height: 25px; border-radius: 3px; }
+.ppt-cut-row span { min-width: 22px; font-variant-numeric: tabular-nums; }
+.ppt-cut-editor .ppt-actions { margin-top: 18px; justify-content: flex-start; }
+.ppt-playback-settings { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 18px; }
+.ppt-playback-settings label { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #726552; }
+.ppt-help { font-size: 12px; color: #867761; line-height: 1.8; margin-top: 18px; }
+.ppt-status { font-size: 12px; color: #726552; line-height: 1.7; margin-top: 20px; padding-top: 14px; border-top: 1px solid #ded3c0; min-height: 35px; }
+.ppt-error { margin-top: 16px; background: #f9e6e2; padding: 12px; color: #a92c3e; font-size: 13px; }
+@media (max-width: 740px) {
+  .ppt-panel { padding: 18px; }
+  .ppt-heading { flex-direction: column; align-items: stretch; gap: 16px; }
+  .ppt-panel h2 { font-size: 23px; }
+  .ppt-summary { gap: 12px; }
+  .ppt-summary-note { margin-left: 0; width: 100%; }
+  .ppt-workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .ppt-preview-column { max-width: 340px; }
+  .ppt-part-row { gap: 8px; }
+  .ppt-part-number { min-width: 45px; }
+  .ppt-duration input { width: 65px; }
+}
+
 /* ===== 书法水墨风格设计系统 ===== */
 
 /* 色彩系统 - 墨色系 */
