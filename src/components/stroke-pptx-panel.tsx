@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { analyzeCharacter, animationTimeline, defaultSettings, DIRECTIONS, geometryPath, MIN_CUT_GAP, pointAt, splitStroke, validSettings } from '@/lib/stroke-split'
 import type { CharacterData, Direction, StrokeModel, StrokeSettings } from '@/lib/stroke-split'
 import type { DrawingStyle } from '@/lib/stroke-pptx'
@@ -13,16 +14,17 @@ function signature(data: CharacterData) {
   return String(hash >>> 0)
 }
 
-export default function StrokePptxPanel({ character, data, style }: { character: string; data: CharacterData; style: DrawingStyle }) {
+export default function StrokePptxPanel({ character, data, style, downloadTarget }: { character: string; data: CharacterData; style: DrawingStyle; downloadTarget: HTMLElement | null }) {
   const analysis = useMemo(() => {
     try { return { models: analyzeCharacter(data), error: '' } }
     catch (error) { return { models: [], error: error instanceof Error ? error.message : '笔画分析失败' } }
   }, [data])
-  return analysis.error ? <section className="ppt-panel"><h2>笔顺动画 PPT</h2><p role="alert">{analysis.error}</p></section> :
-    <Editor key={`${character}-${signature(data)}`} character={character} models={analysis.models} fingerprint={signature(data)} style={style} />
+  return analysis.error ? <section className="ppt-panel"><h2>笔顺动画 PPT</h2><p role="alert">{analysis.error}</p>
+    {downloadTarget && createPortal(<button type="button" disabled title={analysis.error} className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg opacity-50">下载PPT</button>, downloadTarget)}</section> :
+    <Editor key={`${character}-${signature(data)}`} character={character} models={analysis.models} fingerprint={signature(data)} style={style} downloadTarget={downloadTarget} />
 }
 
-function Editor({ character, models, fingerprint, style }: { character: string; models: StrokeModel[]; fingerprint: string; style: DrawingStyle }) {
+function Editor({ character, models, fingerprint, style, downloadTarget }: { character: string; models: StrokeModel[]; fingerprint: string; style: DrawingStyle; downloadTarget: HTMLElement | null }) {
   const [initial] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey(character)) ?? 'null')
@@ -39,6 +41,7 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
   const [elapsed, setElapsed] = useState<number | null>(null)
   const [scope, setScope] = useState<'all' | 'stroke'>('all')
   const [busy, setBusy] = useState(false)
+  const exportingRef = useRef(false)
   const [message, setMessage] = useState(initial.restored ? '已载入这个字的已保存调整。如需重新自动拆分，可在“调整分段”中恢复整字。' : '')
   const [exportError, setExportError] = useState('')
   const dragging = useRef<number | null>(null)
@@ -106,7 +109,8 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
     } catch { setMessage('浏览器无法保存设置；仍可预览和下载 PPT') }
   }
   const download = async () => {
-    if (result.error || busy) return
+    if (result.error || exportingRef.current) return
+    exportingRef.current = true
     setBusy(true)
     setExportError('')
     try {
@@ -122,10 +126,16 @@ function Editor({ character, models, fingerprint, style }: { character: string; 
       setTimeout(() => URL.revokeObjectURL(url), 30000)
       setMessage('PPT 已生成。打开文件后进入幻灯片放映，即可自动书写。')
     } catch (error) { setExportError(error instanceof Error ? error.message : '导出失败，请重试') }
-    finally { setBusy(false) }
+    finally { exportingRef.current = false; setBusy(false) }
   }
 
   return <section className="ppt-panel" aria-labelledby="ppt-heading">
+    {/* Both buttons use the live editor state, including unsaved adjustments. */}
+    {downloadTarget && createPortal(<>
+      <button type="button" onClick={download} disabled={busy || !!result.error} aria-busy={busy} title={result.error || undefined}
+        className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">{busy ? '正在生成…' : '下载PPT'}</button>
+      {exportError && <span role="alert" className="text-sm text-cinnabar">{exportError}</span>}
+    </>, downloadTarget)}
     <div className="ppt-heading">
       <div><h2 id="ppt-heading">一字一页，落笔有序</h2><p>自动拆分转弯，下载带擦除动画的 PowerPoint。</p></div>
       <button className="ppt-primary" onClick={download} disabled={busy || !!result.error}>{busy ? '正在生成…' : '↓ 下载笔顺 PPT'}</button>

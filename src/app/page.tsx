@@ -32,6 +32,7 @@ export default function Home() {
   const [exportGhostColor, setExportGhostColor] = useState('#d4c5b0') // 默认浅古沙色
   const [strokePaths, setStrokePaths] = useState<string[]>([])
   const [loadedCharacter, setLoadedCharacter] = useState<{ character: string; data: CharacterData } | null>(null)
+  const [pptDownloadTarget, setPptDownloadTarget] = useState<HTMLDivElement | null>(null)
   const [loadError, setLoadError] = useState('')
   const [reload, setReload] = useState(0)
   const loadIdRef = useRef(0)
@@ -1026,7 +1027,9 @@ Next
 
               {/* 导出按钮 */}
               <div className="flex flex-wrap justify-center gap-3">
-                <a href="#ppt-workshop" className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg hover:opacity-90 transition-opacity">下载PPT</a>
+                <div ref={setPptDownloadTarget} className="contents">
+                  {loadedCharacter?.character !== char && <button type="button" disabled className="px-4 py-2 bg-cinnabar text-white text-sm rounded-lg opacity-50">下载PPT</button>}
+                </div>
                 <button
                   onClick={exportAllStrokesZip}
                   disabled={totalStrokes === 0}
@@ -1121,7 +1124,7 @@ Next
         </div>
 
         <div id="ppt-workshop" className="max-w-7xl mx-auto mt-8 scroll-mt-4">
-          {loadedCharacter?.character === char ? <StrokePptxPanel character={char} data={loadedCharacter.data} style={getExportOpts()} /> :
+          {loadedCharacter?.character === char ? <StrokePptxPanel character={char} data={loadedCharacter.data} style={getExportOpts()} downloadTarget={pptDownloadTarget} /> :
             <div className="ppt-panel"><h2>笔顺动画 PPT</h2><p role={loadError ? 'alert' : 'status'}>{loadError || '正在读取汉字笔画，稍后即可预览并下载动画 PPT…'}</p>
               {loadError && <button className="ppt-primary" onClick={() => setReload(value => value + 1)}>重试加载</button>}</div>}
         </div>
