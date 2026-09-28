@@ -55,6 +55,7 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
   const timeline = useMemo(() => animationTimeline(result.segments.filter(s => scope === 'all' || s.stroke === selected), gap, speed), [result.segments, selected, scope, gap, speed])
   const totalTime = timeline.at(-1)?.end ?? 0
   const allTime = animationTimeline(result.segments, gap, speed).at(-1)?.end ?? 0
+  const activeStroke = elapsed === null ? undefined : timeline.findLast(entry => entry.start <= elapsed)?.segment.stroke
 
   useEffect(() => {
     if (!playing) return
@@ -164,7 +165,8 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
               const horizontal = segment.direction === 'left' || segment.direction === 'right'
               const width = horizontal ? b.width * progress : b.width, height = horizontal ? b.height : b.height * progress
               const x = b.x + (segment.direction === 'left' ? b.width - width : 0), y = b.y + (segment.direction === 'up' ? b.height - height : 0)
-              return <g key={i}><defs><clipPath id={`${clipPrefix}-${i}`}><rect x={x} y={y} width={width} height={height} /></clipPath></defs><path d={segment.path} fill={style.strokeColor} stroke={style.strokeColor} strokeWidth="0.4" clipPath={`url(#${clipPrefix}-${i})`} /></g>
+              const fill = segment.stroke === activeStroke ? style.currentStrokeColor : style.strokeColor
+              return <g key={i}><defs><clipPath id={`${clipPrefix}-${i}`}><rect x={x} y={y} width={width} height={height} /></clipPath></defs><path d={segment.path} fill={fill} stroke={fill} strokeWidth="0.4" clipPath={`url(#${clipPrefix}-${i})`} /></g>
             })}
             {editing && elapsed === null && <g><polyline points={models[selected].median.map(p => p.join(',')).join(' ')} fill="none" stroke="#fff" strokeWidth="5" strokeDasharray="10 10" />
               {settings[selected].cuts.map((cut, i) => {
@@ -199,7 +201,7 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
         </div>}
         <div className="ppt-playback-settings"><label>播放速度<select value={speed} onChange={e => { stop(); setSpeed(Number(e.target.value)) }}><option value="0.5">0.5× 慢速</option><option value="1">1× 正常</option><option value="1.5">1.5×</option><option value="2">2× 快速</option></select></label>
           <label>笔间停顿<select value={gap} onChange={e => { stop(); setGap(Number(e.target.value)) }}><option value="0">不停顿</option><option value="180">0.18 秒</option><option value="350">0.35 秒</option><option value="600">0.6 秒</option></select></label></div>
-        <p className="ppt-help">PPT 沿用上方的格线、底字和常规笔画色。曲线擦除为近似效果，复杂弯钩可先预览再调整。</p>
+        <p className="ppt-help">PPT 沿用上方的格线、底字和两种笔画色。当前一笔高亮，开始下一笔时，上一笔切回常规色。曲线擦除为近似效果，复杂弯钩可先预览再调整。</p>
       </div>
     </div>
     {(result.error || exportError) && <p className="ppt-error" role="alert">{result.error || exportError}</p>}
