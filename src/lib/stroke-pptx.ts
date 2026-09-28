@@ -34,11 +34,12 @@ export function buildTiming(segments: Segment[], shapeIds: number[], gap: number
     const ids = [node++, node++, node++, node++]
     const target = `<p:tgtEl><p:spTgt spid="${shapeIds[index]}"/></p:tgtEl>`
     const highlight = changeColor(shapeIds[index], style.currentStrokeColor)
-    // All parts of a stroke stay highlighted until the next whole stroke starts.
-    const completed = index > 0 && segment.stroke !== segments[index - 1].stroke
-      ? segments.slice(0, index).flatMap((previous, i) => previous.stroke === segments[index - 1].stroke ? [
+    // Reset every part together as soon as this whole stroke ends, including
+    // the final stroke. Inter-stroke pauses must already show the regular color.
+    const completed = segment.stroke !== segments[index + 1]?.stroke
+      ? segments.slice(0, index + 1).flatMap((previous, i) => previous.stroke === segment.stroke ? [
         `<p:par><p:cTn id="${node++}" presetID="1" presetClass="emph" presetSubtype="2" fill="hold" nodeType="withEffect">
-        <p:stCondLst><p:cond delay="${delay}"/></p:stCondLst><p:childTnLst>${changeColor(shapeIds[i], style.strokeColor)}</p:childTnLst></p:cTn></p:par>`,
+        <p:stCondLst><p:cond delay="${delay + duration}"/></p:stCondLst><p:childTnLst>${changeColor(shapeIds[i], style.strokeColor)}</p:childTnLst></p:cTn></p:par>`,
       ] : []).join('') : ''
     return `<p:par><p:cTn id="${ids[0]}" fill="hold"><p:stCondLst><p:cond delay="${start - delay}"/></p:stCondLst><p:childTnLst>
       <p:par><p:cTn id="${ids[1]}" presetID="22" presetClass="entr" presetSubtype="${subtype[segment.direction]}" fill="hold" grpId="0" nodeType="afterEffect">
@@ -98,9 +99,9 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
     }
   }
   if (style.ghost) models.forEach((model, i) => addGeometry(model.outline, style.ghostColor, backgroundName(`底字-${i + 1}`)))
-  // Editing view matches the final preview: the last stroke remains current.
-  segments.forEach(segment => addGeometry(segment.geometry,
-    segment.stroke === segments.at(-1)!.stroke ? style.currentStrokeColor : style.strokeColor, shapeName(character, segment)))
+  // Outside slideshow playback, the whole character is a ghost. Animation
+  // behaviors supply the current and completed colors without extra objects.
+  segments.forEach(segment => addGeometry(segment.geometry, style.ghostColor, shapeName(character, segment)))
   slide.addNotes(`汉字：${character}\n原笔画：${models.length}，动画片段：${segments.length}。进入放映后自动书写。\n字形来源：Hanzi Writer / Make Me a Hanzi（Arphic Public License），https://github.com/chanind/hanzi-writer-data`)
   const buffer = await pptx.write({ outputType: 'arraybuffer' }) as ArrayBuffer
   const zip = await JSZip.loadAsync(buffer)

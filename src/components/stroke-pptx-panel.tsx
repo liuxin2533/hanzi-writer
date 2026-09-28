@@ -55,7 +55,8 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
   const timeline = useMemo(() => animationTimeline(result.segments.filter(s => scope === 'all' || s.stroke === selected), gap, speed), [result.segments, selected, scope, gap, speed])
   const totalTime = timeline.at(-1)?.end ?? 0
   const allTime = animationTimeline(result.segments, gap, speed).at(-1)?.end ?? 0
-  const activeStroke = elapsed === null ? undefined : timeline.findLast(entry => entry.start <= elapsed)?.segment.stroke
+  const activeStroke = elapsed === null ? undefined : timeline.find(entry => entry.start <= elapsed && elapsed < entry.end)?.segment.stroke
+  const showSegments = editing && elapsed === null
 
   useEffect(() => {
     if (!playing) return
@@ -145,7 +146,7 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
     <div className="ppt-workspace">
       <div className="ppt-preview-column">
         <div className="ppt-preview">
-          <svg ref={svgRef} viewBox="0 0 1024 1024" role="img" aria-label={`${character}的${elapsed === null ? '分段' : '擦除动画'}预览`}
+          <svg ref={svgRef} viewBox="0 0 1024 1024" role="img" aria-label={`${character}的${showSegments ? '分段' : elapsed === null ? '底字' : '擦除动画'}预览`}
             onPointerMove={event => {
               if (dragging.current === null || !svgRef.current) return
               const rect = svgRef.current.getBoundingClientRect()
@@ -159,8 +160,9 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
             }} onPointerUp={() => { dragging.current = null }} onPointerCancel={() => { dragging.current = null }}>
             {style.grid && <g fill="none"><rect x="8" y="8" width="1008" height="1008" stroke={style.gridBorderColor} strokeWidth={style.gridBorderWidth * 4} />
               <path d="M0 512H1024M512 0V1024M0 0L1024 1024M1024 0L0 1024" stroke={style.gridDashedColor} strokeWidth={style.gridDashedWidth * 4} opacity="0.6" strokeDasharray="32 24" /></g>}
-            {(style.ghost || elapsed === null || scope === 'stroke') && models.map((model, i) => <path key={i} d={geometryPath(model.outline)} fill={elapsed === null && i !== selected ? '#ded9cd' : style.ghostColor} opacity={elapsed === null && i !== selected ? 0.65 : 1} />)}
-            {elapsed === null ? parts.map((part, i) => <path key={i} d={part.path} fill={COLORS[i % COLORS.length]} />) : timeline.map(({ segment, start, duration }, i) => {
+            {(style.ghost || showSegments || scope === 'stroke') && models.map((model, i) => <path key={i} d={geometryPath(model.outline)} fill={showSegments && i !== selected ? '#ded9cd' : style.ghostColor} opacity={showSegments && i !== selected ? 0.65 : 1} />)}
+            {showSegments && parts.map((part, i) => <path key={i} d={part.path} fill={COLORS[i % COLORS.length]} />)}
+            {elapsed !== null && timeline.map(({ segment, start, duration }, i) => {
               const progress = Math.max(0, Math.min(1, (elapsed - start) / duration)), b = segment.bounds
               const horizontal = segment.direction === 'left' || segment.direction === 'right'
               const width = horizontal ? b.width * progress : b.width, height = horizontal ? b.height : b.height * progress
@@ -177,8 +179,8 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
               })}</g>}
           </svg>
         </div>
-        <div className="ppt-preview-caption">{elapsed === null ? `第 ${selected + 1} 笔 · ${parts.length} 段以不同颜色标示` : `${scope === 'all' ? '整字' : '当前笔'}擦除预览 · ${((elapsed ?? 0) / 1000).toFixed(1)} / ${(totalTime / 1000).toFixed(1)} 秒`}</div>
-        <div className="ppt-actions"><button onClick={() => play('all')} disabled={playing || !!result.error}>▶ 预览整字</button><button onClick={stop} disabled={elapsed === null}>↺ 查看分段</button></div>
+        <div className="ppt-preview-caption">{showSegments ? `第 ${selected + 1} 笔 · ${parts.length} 段以不同颜色标示` : elapsed === null ? '未播放 · 底字预览' : `${scope === 'all' ? '整字' : '当前笔'}擦除预览 · ${(elapsed / 1000).toFixed(1)} / ${(totalTime / 1000).toFixed(1)} 秒`}</div>
+        <div className="ppt-actions"><button onClick={() => play('all')} disabled={playing || !!result.error}>▶ 预览整字</button><button onClick={stop} disabled={elapsed === null}>↺ 重置预览</button></div>
       </div>
       <div className="ppt-controls">
         <div className="ppt-control-title"><h3>笔画与片段</h3><button className="ppt-text-button" onClick={() => { stop(); setEditing(!editing) }}>{editing ? '收起调整' : '调整分段'}</button></div>
@@ -201,7 +203,7 @@ function Editor({ character, models, fingerprint, style, downloadTarget }: { cha
         </div>}
         <div className="ppt-playback-settings"><label>播放速度<select value={speed} onChange={e => { stop(); setSpeed(Number(e.target.value)) }}><option value="0.5">0.5× 慢速</option><option value="1">1× 正常</option><option value="1.5">1.5×</option><option value="2">2× 快速</option></select></label>
           <label>笔间停顿<select value={gap} onChange={e => { stop(); setGap(Number(e.target.value)) }}><option value="0">不停顿</option><option value="180">0.18 秒</option><option value="350">0.35 秒</option><option value="600">0.6 秒</option></select></label></div>
-        <p className="ppt-help">PPT 沿用上方的格线、底字和两种笔画色。当前一笔高亮，开始下一笔时，上一笔切回常规色。曲线擦除为近似效果，复杂弯钩可先预览再调整。</p>
+        <p className="ppt-help">PPT 沿用上方的格线、底字和两种笔画色。未播放显示底字色，当前笔高亮，每笔完成后恢复常规色。曲线擦除为近似效果，复杂弯钩可先预览再调整。</p>
       </div>
     </div>
     {(result.error || exportError) && <p className="ppt-error" role="alert">{result.error || exportError}</p>}

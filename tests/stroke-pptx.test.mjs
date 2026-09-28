@@ -41,16 +41,20 @@ test('号: object names use the character, stroke number and part number', async
   })
 })
 
-test('号: PPT preserves regular and current stroke colors and animates their change', async t => {
+test('号: before playback every animated part has the ghost fill and outline', async t => {
+  const { nodes } = await exportHao(t)
+  const shapes = new Map(nodes('sp').map(n => [n.getElementsByTagName('p:cNvPr')[0].getAttribute('id'), n]))
+  nodes('animEffect').forEach(effect => {
+    const target = effect.getElementsByTagName('p:spTgt')[0].getAttribute('spid')
+    const fills = [...shapes.get(target).getElementsByTagName('a:solidFill')].map(n => n.firstElementChild.getAttribute('val'))
+    assert.deepEqual(fills, ['CDEFAB', 'CDEFAB'])
+  })
+})
+
+test('号: only the playing stroke is highlighted; every whole stroke completes in the regular color', async t => {
   const gap = 350, speed = 2
   const { nodes, segments } = await exportHao(t, { gap, speed })
-  const shapes = new Map(nodes('sp').map(n => [n.getElementsByTagName('p:cNvPr')[0].getAttribute('id'), n]))
   const effects = nodes('animEffect')
-  effects.forEach((effect, i) => {
-    const target = effect.getElementsByTagName('p:spTgt')[0].getAttribute('spid')
-    const fill = shapes.get(target).getElementsByTagName('a:solidFill')[0].firstElementChild.getAttribute('val')
-    assert.equal(fill, segments[i].stroke === segments.at(-1).stroke ? 'AB2345' : '123456')
-  })
   const colorChanges = nodes('animClr')
   const timeline = animationTimeline(segments, gap, speed)
   const startsAt = behavior => {
@@ -65,14 +69,13 @@ test('号: PPT preserves regular and current stroke colors and animates their ch
   }
   effects.forEach((effect, i) => {
     const target = effect.getElementsByTagName('p:spTgt')[0].getAttribute('spid')
-    const nextStroke = timeline.find(entry => entry.segment.stroke > segments[i].stroke)
-    const expected = [{ time: timeline[i].start, to: 'AB2345' }]
-    if (nextStroke) expected.push({ time: nextStroke.start, to: '123456' })
+    const completedStroke = timeline.findLast(entry => entry.segment.stroke === segments[i].stroke)
+    const expected = [{ time: timeline[i].start, to: 'AB2345' }, { time: completedStroke.end, to: '123456' }]
     for (const attribute of ['fillcolor', 'stroke.color']) {
       const changes = colorChanges.filter(n => n.getElementsByTagName('p:spTgt')[0].getAttribute('spid') === target &&
         n.getElementsByTagName('p:attrName')[0].textContent === attribute)
         .map(n => ({ time: startsAt(n), to: n.getElementsByTagName('a:srgbClr')[0].getAttribute('val') }))
-      assert.deepEqual(changes, expected, `${target} ${attribute}: retain highlight through all parts and the inter-stroke pause`)
+      assert.deepEqual(changes, expected, `${target} ${attribute}: reset all parts when the whole stroke ends, including the final stroke`)
     }
   })
 })
