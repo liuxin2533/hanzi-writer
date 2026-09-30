@@ -1,6 +1,6 @@
 import PptxGenJS from 'pptxgenjs'
 import JSZip from 'jszip'
-import { animationTimeline, boundsOf, geometryPath } from './stroke-split.ts'
+import { animationTimeline, geometryPath } from './stroke-split.ts'
 import type { Segment, StrokeModel } from './stroke-split.ts'
 import type { MultiPolygon } from 'polygon-clipping'
 
@@ -15,6 +15,10 @@ export const DEFAULT_STYLE: DrawingStyle = {
 const color = (hex: string) => /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : '1a1a1a'
 const shapeName = (character: string, segment: Segment) => `${character}-${segment.stroke + 1}-part-${segment.part + 1}`
 const escapeXml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+const drawingCanvas = (style: DrawingStyle) => {
+  const padding = style.grid ? Math.ceil(Math.max(1, style.gridBorderWidth * 2 - 8, style.gridDashedWidth * 2)) : 1
+  return { padding, extent: 1024 + padding * 2 }
+}
 
 // Mirrors PowerPoint's automatic, after-previous entrance sequence.
 // OOXML's wipe filter names the origin edge: wipe(up) reveals from top to bottom.
@@ -69,16 +73,18 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
   const slide = pptx.addSlide()
   slide.background = { color: 'FFFFFF' }
   const size = 5.8, x = (13.333333 - size) / 2, y = (7.5 - size) / 2, scale = size / 1024
+  const { padding, extent } = drawingCanvas(style)
+  const canvasBox = { x: x - padding * scale, y: y - padding * scale, w: extent * scale, h: extent * scale }
   const addGeometry = (geometry: MultiPolygon, fill: string, objectName: string) => {
-    const bounds = boundsOf(geometry)
+    // Keep every selectable object on the same canvas. Native custom geometry
+    // preserves the ink's offset within it, and PowerPoint wipes the ink bounds.
     const points: NonNullable<PptxGenJS.ShapeProps['points']> = geometry.flatMap(polygon => polygon.flatMap(ring => [
-      ...ring.slice(0, -1).map((p, i) => ({ x: (p[0] - bounds.x) * scale, y: (p[1] - bounds.y) * scale, moveTo: i === 0 })),
+      ...ring.slice(0, -1).map((p, i) => ({ x: (p[0] + padding) * scale, y: (p[1] + padding) * scale, moveTo: i === 0 })),
       { close: true as const },
     ]))
     // PptxGenJS 4 supports custGeom at runtime, but omits it from its ShapeType enum.
     slide.addShape('custGeom' as PptxGenJS.ShapeType, {
-      x: x + bounds.x * scale, y: y + bounds.y * scale,
-      w: bounds.width * scale, h: bounds.height * scale, points,
+      ...canvasBox, points,
       // A subpixel outline hides antialiasing seams where two independent shapes meet.
       fill: { color: color(fill) }, line: { color: color(fill), width: 0.15 }, objectName,
     })
@@ -87,14 +93,12 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
     // A single SVG picture has no expandable child objects in PowerPoint.
     // PptxGenJS also creates a PNG fallback in the browser for older readers.
     // Padding preserves thick grid strokes while keeping the glyph aligned.
-    const padding = style.grid ? Math.ceil(Math.max(1, style.gridBorderWidth * 2 - 8, style.gridDashedWidth * 2)) : 1
-    const extent = 1024 + padding * 2
     const grid = style.grid ? `<rect x="8" y="8" width="1008" height="1008" fill="none" stroke="#${color(style.gridBorderColor)}" stroke-width="${style.gridBorderWidth * 4}"/>
       <path d="M0 512H1024M512 0V1024M0 0L1024 1024M1024 0L0 1024" fill="none" stroke="#${color(style.gridDashedColor)}" stroke-width="${style.gridDashedWidth * 4}" opacity="0.6" stroke-dasharray="32 24"/>` : ''
     const ghost = style.ghost ? models.map(model => `<path d="${geometryPath(model.outline)}" fill="#${color(style.ghostColor)}" stroke="#${color(style.ghostColor)}" stroke-width="${0.15 / (scale * 72)}"/>`).join('') : ''
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${extent}" height="${extent}" viewBox="${-padding} ${-padding} ${extent} ${extent}">${grid}${ghost}</svg>`
-    slide.addImage({ data: `data:image/svg+xml;base64,${btoa(svg)}`, x: x - padding * scale, y: y - padding * scale,
-      w: extent * scale, h: extent * scale, objectName: escapeXml(`${character}-0`), altText: `${character}的格线与底字` })
+    slide.addImage({ ...canvasBox, data: `data:image/svg+xml;base64,${btoa(svg)}`,
+      objectName: escapeXml(`${character}-0`), altText: `${character}的格线与底字` })
   }
   // Outside slideshow playback, the whole character is a ghost. Animation
   // behaviors supply the current and completed colors without extra objects.

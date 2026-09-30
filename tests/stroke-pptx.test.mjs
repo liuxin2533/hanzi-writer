@@ -58,6 +58,35 @@ test('号: object names use the character, stroke number and part number', async
   })
 })
 
+test('all stroke parts and the background share a canvas when resized individually together', async t => {
+  const { nodes, segments } = await exportHao(t)
+  const objects = [...nodes('spTree')[0].children].filter(n => ['sp', 'pic'].includes(n.localName))
+  const transforms = objects.map(object => {
+    const transform = object.getElementsByTagName('a:xfrm')[0]
+    const offset = transform.getElementsByTagName('a:off')[0]
+    const size = transform.getElementsByTagName('a:ext')[0]
+    return ['x', 'y'].map(a => Number(offset.getAttribute(a))).concat(['cx', 'cy'].map(a => Number(size.getAttribute(a))))
+  })
+  assert.equal(transforms.length, segments.length + 1)
+  for (const transform of transforms) assert.deepEqual(transform, transforms[0], 'every object must have identical left, top, width and height')
+  // Setting the same smaller/larger square size on every selected object must
+  // preserve each path's position inside the background canvas.
+  const svgPadding = 4
+  const canvasUnits = 1024 + svgPadding * 2
+  for (const factor of [0.5, 1.5]) {
+    nodes('sp').forEach((shape, i) => {
+      const path = shape.getElementsByTagName('a:path')[0]
+      const point = path.getElementsByTagName('a:pt')[0]
+      const geometryPoint = segments[i].geometry[0][0][0]
+      for (const [axis, attribute] of ['x', 'y'].entries()) {
+        const actual = Number(point.getAttribute(attribute)) / Number(path.getAttribute(axis === 0 ? 'w' : 'h')) * transforms[0][axis + 2] * factor
+        const expected = (geometryPoint[axis] + svgPadding) / canvasUnits * transforms[0][axis + 2] * factor
+        assert.ok(Math.abs(actual - expected) < 2, `${attribute}: resized ink must stay aligned with its background`)
+      }
+    })
+  }
+})
+
 test('号: before playback every animated part has the ghost fill and outline', async t => {
   const { nodes } = await exportHao(t)
   const shapes = new Map(nodes('sp').map(n => [n.getElementsByTagName('p:cNvPr')[0].getAttribute('id'), n]))
