@@ -16,19 +16,36 @@ async function exportHao(t, { grid = true, ghost = true, gap = 180, speed = 1 } 
   t.after(() => dom.window.close())
   const doc = dom.window.document
   const nodes = name => [...doc.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', name)]
-  return { doc, nodes, models, segments, style }
+  return { doc, nodes, models, segments, style, zip }
 }
 
-test('号: grid and ghost form one background object beside the animation parts', async t => {
-  const { nodes, segments } = await exportHao(t)
+async function backgroundSvg(t, nodes, zip) {
+  const picture = nodes('pic')[0]
+  const svgId = picture.getElementsByTagName('asvg:svgBlip')[0].getAttribute('r:embed')
+  const rels = new JSDOM(await zip.file('ppt/slides/_rels/slide1.xml.rels').async('string'), { contentType: 'text/xml' })
+  t.after(() => rels.window.close())
+  const relation = [...rels.window.document.getElementsByTagName('Relationship')].find(n => n.getAttribute('Id') === svgId)
+  const svgPath = relation.getAttribute('Target').replace('../', 'ppt/')
+  const svg = new JSDOM(await zip.file(svgPath).async('string'), { contentType: 'image/svg+xml' })
+  t.after(() => svg.window.close())
+  return svg.window.document
+}
+
+test('号: grid and ghost are a single SVG picture, without a group or child shapes', async t => {
+  const { nodes, segments, models, zip } = await exportHao(t)
   const objects = [...nodes('spTree')[0].children].filter(n => ['sp', 'grpSp', 'pic'].includes(n.localName))
   assert.equal(objects.length, segments.length + 1)
   assert.equal(objects[0].getElementsByTagName('p:cNvPr')[0].getAttribute('name'), '号-0')
-  assert.equal(objects[0].localName, 'grpSp')
-  const backgroundColors = new Set([...objects[0].getElementsByTagName('a:srgbClr')].map(n => n.getAttribute('val')))
-  assert.deepEqual(backgroundColors, new Set(['CDEFAB', '12ABCD', '987654']))
+  assert.equal(objects[0].localName, 'pic')
+  assert.equal(nodes('grpSp').length, 0, 'no expandable groups anywhere in the slide')
+  assert.equal(nodes('sp').length, segments.length, 'only animated parts remain as shapes')
+  assert.equal(nodes('pic').length, 1)
+  const svg = await backgroundSvg(t, nodes, zip)
+  assert.equal(svg.querySelector('rect').getAttribute('stroke').toUpperCase(), '#12ABCD')
+  assert.equal(svg.querySelector('path[stroke-dasharray]').getAttribute('stroke').toUpperCase(), '#987654')
+  assert.equal(svg.querySelectorAll('path[fill="#CDEFAB"]').length, models.length)
   const ids = nodes('cNvPr').map(n => n.getAttribute('id'))
-  assert.equal(new Set(ids).size, ids.length, 'group and shape IDs stay unique')
+  assert.equal(new Set(ids).size, ids.length, 'image and shape IDs stay unique')
 })
 
 test('号: object names use the character, stroke number and part number', async t => {
@@ -80,17 +97,23 @@ test('号: only the playing stroke is highlighted; every whole stroke completes 
   })
 })
 
-test('background grouping follows the grid and ghost switches', async t => {
+test('the single background picture follows the grid and ghost switches', async t => {
   for (const [grid, ghost] of [[true, false], [false, true], [false, false]]) {
-    const { nodes, models, segments } = await exportHao(t, { grid, ghost })
-    const groups = nodes('grpSp')
-    assert.equal(groups.length, grid || ghost ? 1 : 0)
-    if (groups.length) assert.equal(groups[0].getElementsByTagName('p:sp').length, (grid ? 5 : 0) + (ghost ? models.length : 0))
+    const { nodes, models, segments, zip } = await exportHao(t, { grid, ghost })
+    assert.equal(nodes('grpSp').length, 0)
+    assert.equal(nodes('pic').length, grid || ghost ? 1 : 0)
+    assert.equal(nodes('sp').length, segments.length)
+    if (grid || ghost) {
+      const svg = await backgroundSvg(t, nodes, zip)
+      assert.equal(svg.querySelectorAll('rect').length, grid ? 1 : 0)
+      assert.equal(svg.querySelectorAll('path[stroke-dasharray]').length, grid ? 1 : 0)
+      assert.equal(svg.querySelectorAll('path[fill="#CDEFAB"]').length, ghost ? models.length : 0)
+    }
     assert.equal(nodes('animEffect').length, segments.length)
   }
 })
 
-for (const character of ['弯', '心']) {
+for (const character of ['弯', '心', '呼', '呀']) {
   test(`${character}: exported PPTX has one slide, editable pieces, valid XML and automatic wipe targets`, async () => {
     const data = JSON.parse(readFileSync(new URL(`./fixtures/${character}.json`, import.meta.url), 'utf8'))
     const models = analyzeCharacter(data)
@@ -127,7 +150,13 @@ for (const character of ['弯', '心']) {
     assert.equal(nodes('cTn').filter(n => n.getAttribute('nodeType') === 'afterEffect').length, segments.length)
     assert.ok(nodes('cond').some(n => n.getAttribute('evt') === 'onBegin'), 'automatic start on slide entry')
     assert.equal(nodes('cond').filter(n => n.getAttribute('evt') === 'onClick').length, 0)
-    assert.equal(doc.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'custGeom').length, models.length + segments.length)
+    assert.equal(nodes('grpSp').length, 0)
+    assert.equal(nodes('pic').length, 1)
+    assert.equal(doc.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'custGeom').length, segments.length)
+    if (character === '呼' || character === '呀') {
+      assert.equal(segments.length, 11)
+      assert.equal(nodes('cNvPr').length - 1, 12, '11 animated parts plus one indivisible background')
+    }
     dom.window.close()
   })
 }

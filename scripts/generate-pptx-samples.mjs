@@ -3,7 +3,7 @@ import { analyzeCharacter, defaultSettings, splitStroke } from '../src/lib/strok
 import { createStrokePptx, DEFAULT_STYLE } from '../src/lib/stroke-pptx.ts'
 
 mkdirSync('.local/pptx-samples', { recursive: true })
-for (const character of ['口', '弯', '乙', '心', '永', '笔', '号']) {
+for (const character of ['口', '弯', '乙', '心', '永', '笔', '号', '呼', '呀']) {
   const data = JSON.parse(readFileSync(new URL(`../tests/fixtures/${character}.json`, import.meta.url), 'utf8'))
   const models = analyzeCharacter(data)
   const segments = models.flatMap((model, i) => splitStroke(model, defaultSettings(model), i))

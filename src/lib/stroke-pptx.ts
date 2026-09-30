@@ -1,6 +1,6 @@
 import PptxGenJS from 'pptxgenjs'
 import JSZip from 'jszip'
-import { animationTimeline, boundsOf } from './stroke-split.ts'
+import { animationTimeline, boundsOf, geometryPath } from './stroke-split.ts'
 import type { Segment, StrokeModel } from './stroke-split.ts'
 import type { MultiPolygon } from 'polygon-clipping'
 
@@ -69,12 +69,6 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
   const slide = pptx.addSlide()
   slide.background = { color: 'FFFFFF' }
   const size = 5.8, x = (13.333333 - size) / 2, y = (7.5 - size) / 2, scale = size / 1024
-  const backgroundNames = new Set<string>()
-  const backgroundName = (suffix: string) => {
-    const name = `${character}-0-${suffix}`
-    backgroundNames.add(escapeXml(name))
-    return name
-  }
   const addGeometry = (geometry: MultiPolygon, fill: string, objectName: string) => {
     const bounds = boundsOf(geometry)
     const points: NonNullable<PptxGenJS.ShapeProps['points']> = geometry.flatMap(polygon => polygon.flatMap(ring => [
@@ -89,16 +83,19 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
       fill: { color: color(fill) }, line: { color: color(fill), width: 0.15 }, objectName,
     })
   }
-  if (style.grid) {
-    slide.addShape(pptx.ShapeType.rect, { x: x + 8 * scale, y: y + 8 * scale, w: 1008 * scale, h: 1008 * scale,
-      line: { color: color(style.gridBorderColor), width: style.gridBorderWidth * 4 * scale * 72 }, objectName: backgroundName('外框') })
-    for (const [i, [ax, ay, bx, by]] of [[0, 512, 1024, 512], [512, 0, 512, 1024], [0, 0, 1024, 1024], [0, 1024, 1024, 0]].entries()) {
-      slide.addShape(pptx.ShapeType.line, { x: x + ax * scale, y: y + Math.min(ay, by) * scale,
-        w: (bx - ax) * scale, h: Math.abs(by - ay) * scale, flipV: by < ay,
-        line: { color: color(style.gridDashedColor), width: style.gridDashedWidth * 4 * scale * 72, transparency: 40, dashType: 'dash' }, objectName: backgroundName(`虚线-${i + 1}`) })
-    }
+  if (style.grid || style.ghost) {
+    // A single SVG picture has no expandable child objects in PowerPoint.
+    // PptxGenJS also creates a PNG fallback in the browser for older readers.
+    // Padding preserves thick grid strokes while keeping the glyph aligned.
+    const padding = style.grid ? Math.ceil(Math.max(1, style.gridBorderWidth * 2 - 8, style.gridDashedWidth * 2)) : 1
+    const extent = 1024 + padding * 2
+    const grid = style.grid ? `<rect x="8" y="8" width="1008" height="1008" fill="none" stroke="#${color(style.gridBorderColor)}" stroke-width="${style.gridBorderWidth * 4}"/>
+      <path d="M0 512H1024M512 0V1024M0 0L1024 1024M1024 0L0 1024" fill="none" stroke="#${color(style.gridDashedColor)}" stroke-width="${style.gridDashedWidth * 4}" opacity="0.6" stroke-dasharray="32 24"/>` : ''
+    const ghost = style.ghost ? models.map(model => `<path d="${geometryPath(model.outline)}" fill="#${color(style.ghostColor)}" stroke="#${color(style.ghostColor)}" stroke-width="${0.15 / (scale * 72)}"/>`).join('') : ''
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${extent}" height="${extent}" viewBox="${-padding} ${-padding} ${extent} ${extent}">${grid}${ghost}</svg>`
+    slide.addImage({ data: `data:image/svg+xml;base64,${btoa(svg)}`, x: x - padding * scale, y: y - padding * scale,
+      w: extent * scale, h: extent * scale, objectName: escapeXml(`${character}-0`), altText: `${character}的格线与底字` })
   }
-  if (style.ghost) models.forEach((model, i) => addGeometry(model.outline, style.ghostColor, backgroundName(`底字-${i + 1}`)))
   // Outside slideshow playback, the whole character is a ghost. Animation
   // behaviors supply the current and completed colors without extra objects.
   segments.forEach(segment => addGeometry(segment.geometry, style.ghostColor, shapeName(character, segment)))
@@ -111,18 +108,6 @@ export async function createStrokePptx(character: string, models: StrokeModel[],
   const names = new Map<string, number>()
   for (const match of xml.matchAll(/<p:cNvPr\b[^>]*\bid="(\d+)"[^>]*\bname="([^"]+)"/g)) names.set(match[2], Number(match[1]))
   const ids = segments.map(segment => names.get(escapeXml(shapeName(character, segment))) ?? 0)
-  // One editable background group in the selection pane, below every animated part.
-  const background = [...xml.matchAll(/<p:sp\b[^>]*>[\s\S]*?<\/p:sp>/g)].map(match => match[0])
-    .filter(shape => backgroundNames.has(shape.match(/<p:cNvPr\b[^>]*\bname="([^"]+)"/)?.[1] ?? ''))
-  if (background.length) {
-    const emu = (inches: number) => Math.round(inches * 914400)
-    const groupId = Math.max(...names.values()) + 1
-    const group = `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${groupId}" name="${escapeXml(character)}-0"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-      <p:grpSpPr><a:xfrm><a:off x="${emu(x)}" y="${emu(y)}"/><a:ext cx="${emu(size)}" cy="${emu(size)}"/>
-      <a:chOff x="${emu(x)}" y="${emu(y)}"/><a:chExt cx="${emu(size)}" cy="${emu(size)}"/></a:xfrm></p:grpSpPr>${background.join('')}</p:grpSp>`
-    for (const shape of background.slice(1)) xml = xml.replace(shape, '')
-    xml = xml.replace(background[0], group)
-  }
   const timing = buildTiming(segments, ids, gap, speed, style)
   xml = xml.replace('</p:sld>', `${timing}</p:sld>`)
   zip.file('ppt/slides/slide1.xml', xml)
